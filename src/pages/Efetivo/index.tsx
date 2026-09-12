@@ -1,24 +1,30 @@
-import { useRef, useState } from 'react';
-import type { ChangeEvent, FormEvent } from 'react';
-import Papa from 'papaparse';
-import { Search, UserPlus, Upload, Trash2, Edit2, X, ArrowLeftRight } from 'lucide-react';
+import { useState } from 'react';
+import type { FormEvent } from 'react';
+import { Search, UserPlus, ListPlus, Trash2, Edit2, X, ArrowLeftRight } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { mapLinhaMilitar, type LinhaMilitar } from '../../lib/csvMilitares';
+import { buscarEfetivoDaPlanilha } from '../../lib/planilhaEfetivo';
+import type { LinhaMilitar } from '../../lib/csvMilitares';
+import MilitarPlanilhaAutocomplete from '../../components/MilitarPlanilhaAutocomplete';
 import { FUNCAO_LABELS, FuncaoOperacional, Militar, temPapel } from '../../types';
 
 const TODAS_FUNCOES = Object.keys(FUNCAO_LABELS) as FuncaoOperacional[];
 
 export default function Efetivo() {
-  const { usuarioAtual, militares, ubms, addMilitar, updateMilitar, deleteMilitar, importarMilitaresCsv, transferirMilitarDeUbm } = useApp();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const { usuarioAtual, militares, ubms, addMilitar, updateMilitar, deleteMilitar, transferirMilitarDeUbm } = useApp();
 
   const [busca, setBusca] = useState('');
   const [militarEditando, setMilitarEditando] = useState<Militar | null>(null);
   const [isNovoOpen, setIsNovoOpen] = useState(false);
-  const [resultadoImportacao, setResultadoImportacao] = useState<string | null>(null);
   const [novoMilitarForm, setNovoMilitarForm] = useState({ nome: '', posto: '', matricula: '' });
   const [transferindo, setTransferindo] = useState<Militar | null>(null);
   const [novaUbmId, setNovaUbmId] = useState('');
+
+  const [isBuscaPlanilhaOpen, setIsBuscaPlanilhaOpen] = useState(false);
+  const [linhasPlanilha, setLinhasPlanilha] = useState<LinhaMilitar[]>([]);
+  const [carregandoPlanilha, setCarregandoPlanilha] = useState(false);
+  const [erroPlanilha, setErroPlanilha] = useState<string | null>(null);
+  const [buscaPlanilhaValor, setBuscaPlanilhaValor] = useState('');
+  const [selecionadoPlanilha, setSelecionadoPlanilha] = useState<LinhaMilitar | null>(null);
 
   if (!temPapel(usuarioAtual, 'comandante') && !temPapel(usuarioAtual, 'escalante')) {
     return <div className="p-8 text-center text-gray-500">Você não tem permissão para acessar este módulo.</div>;
@@ -30,26 +36,39 @@ export default function Efetivo() {
     (m) => m.nome.toLowerCase().includes(busca.toLowerCase()) || m.matricula.toLowerCase().includes(busca.toLowerCase()),
   );
 
-  const handleImportar = (e: ChangeEvent<HTMLInputElement>) => {
-    const arquivo = e.target.files?.[0];
-    if (!arquivo) return;
+  const abrirBuscaPlanilha = async () => {
+    setIsBuscaPlanilhaOpen(true);
+    setSelecionadoPlanilha(null);
+    setBuscaPlanilhaValor('');
+    if (linhasPlanilha.length > 0) return;
+    setCarregandoPlanilha(true);
+    setErroPlanilha(null);
+    try {
+      const linhas = await buscarEfetivoDaPlanilha();
+      setLinhasPlanilha(linhas);
+    } catch (erro) {
+      setErroPlanilha(erro instanceof Error ? erro.message : 'Erro ao carregar a planilha de efetivo.');
+    } finally {
+      setCarregandoPlanilha(false);
+    }
+  };
 
-    Papa.parse<Record<string, string>>(arquivo, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (resultado) => {
-        const linhas: LinhaMilitar[] = resultado.data
-          .map((linha) => mapLinhaMilitar(linha))
-          .filter((linha): linha is LinhaMilitar => linha !== null);
-        try {
-          const { criados, ignorados } = await importarMilitaresCsv(ubmId, linhas);
-          setResultadoImportacao(`Importação concluída: ${criados} militares cadastrados, ${ignorados} linhas ignoradas.`);
-        } catch (erro) {
-          setResultadoImportacao(erro instanceof Error ? erro.message : 'Erro ao importar planilha.');
-        }
-      },
+  const jaCadastradoNaUbm = (matricula: string) =>
+    !!matricula && militaresDaUbm.some((m) => m.matricula === matricula);
+
+  const handleInserirDaPlanilha = async () => {
+    if (!selecionadoPlanilha) return;
+    await addMilitar({
+      nome: selecionadoPlanilha.nome,
+      posto: selecionadoPlanilha.posto,
+      matricula: selecionadoPlanilha.matricula,
+      ubmId,
+      funcoes: [],
+      ativo: true,
+      origemCadastro: 'planilha',
     });
-    e.target.value = '';
+    setSelecionadoPlanilha(null);
+    setBuscaPlanilhaValor('');
   };
 
   const handleCriarManual = async (e: FormEvent) => {
@@ -87,15 +106,14 @@ export default function Efetivo() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Efetivo</h1>
-          <p className="mt-1 text-sm text-gray-500">Cadastro de militares, importação de planilha e atribuição de funções.</p>
+          <p className="mt-1 text-sm text-gray-500">Busca na planilha de efetivo, cadastro manual e atribuição de funções.</p>
         </div>
         <div className="flex gap-2">
-          <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImportar} />
           <button
-            onClick={() => inputRef.current?.click()}
+            onClick={abrirBuscaPlanilha}
             className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
           >
-            <Upload className="-ml-1 mr-2 h-5 w-5" /> Importar Planilha
+            <ListPlus className="-ml-1 mr-2 h-5 w-5" /> Adicionar da planilha
           </button>
           <button
             onClick={() => setIsNovoOpen(true)}
@@ -105,13 +123,6 @@ export default function Efetivo() {
           </button>
         </div>
       </div>
-
-      {resultadoImportacao && (
-        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 flex justify-between">
-          {resultadoImportacao}
-          <button onClick={() => setResultadoImportacao(null)}><X className="w-4 h-4" /></button>
-        </div>
-      )}
 
       <div className="bg-white shadow-sm rounded-lg border border-gray-200">
         <div className="p-4 border-b border-gray-200">
@@ -204,6 +215,59 @@ export default function Efetivo() {
                 </label>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {isBuscaPlanilhaOpen && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 relative">
+            <button onClick={() => setIsBuscaPlanilhaOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-500">
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-lg font-medium text-gray-900 mb-1">Adicionar da planilha de efetivo</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Digite o nome, o cargo/posto ou a matrícula (MF). A busca é sempre feita ao vivo na
+              planilha, então promoções e atualizações lá já aparecem aqui.
+            </p>
+
+            {carregandoPlanilha && <p className="text-sm text-gray-500">Carregando planilha...</p>}
+            {erroPlanilha && <p className="text-sm text-red-600 mb-3">{erroPlanilha}</p>}
+
+            {!carregandoPlanilha && !erroPlanilha && (
+              <>
+                <MilitarPlanilhaAutocomplete
+                  linhas={linhasPlanilha}
+                  value={buscaPlanilhaValor}
+                  onChange={(v) => {
+                    setBuscaPlanilhaValor(v);
+                    setSelecionadoPlanilha(null);
+                  }}
+                  onSelect={(linha) => {
+                    setSelecionadoPlanilha(linha);
+                    setBuscaPlanilhaValor(linha.nome);
+                  }}
+                  placeholder="Buscar por nome, posto/cargo ou MF..."
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm"
+                />
+
+                {selecionadoPlanilha && (
+                  <div className="mt-4 p-3 rounded-md border border-gray-200 bg-gray-50">
+                    <p className="text-sm font-medium text-gray-900">{selecionadoPlanilha.nome}</p>
+                    <p className="text-xs text-gray-500">{selecionadoPlanilha.posto} — MF: {selecionadoPlanilha.matricula}</p>
+                    {jaCadastradoNaUbm(selecionadoPlanilha.matricula) && (
+                      <p className="text-xs text-amber-600 mt-1">Já cadastrado nesta UBM — inserir criará um segundo registro.</p>
+                    )}
+                    <button
+                      onClick={handleInserirDaPlanilha}
+                      className="mt-3 inline-flex items-center px-3 py-1.5 border border-transparent rounded-md shadow-sm text-xs font-medium text-white bg-red-700 hover:bg-red-800"
+                    >
+                      Inserir nesta UBM
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

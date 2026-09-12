@@ -33,9 +33,19 @@ login), mas autenticação e persistência ficam desligadas.
 
 - Autenticação, aprovação de cadastro e papéis (módulo Usuários), replicando
   o padrão do Controle de Processos.
-- Efetivo: cadastro manual, importação de planilha (CSV — ver
-  `src/lib/csvMilitares.ts` para o layout de colunas esperado) e atribuição
-  de múltiplas funções por militar.
+- Efetivo: cadastro manual, atribuição de múltiplas funções por militar e
+  "Adicionar da planilha" — um autocomplete (`MilitarPlanilhaAutocomplete`)
+  que busca ao vivo, por nome/posto/matrícula, na planilha pública de
+  efetivo do CBMPA ("Militares e matrícula bm", ver
+  `src/lib/planilhaEfetivo.ts`); ao selecionar, insere o militar na UBM
+  atual. Como a busca é sempre feita em tempo real contra a planilha
+  (nunca um retrato salvo), promoções e demais atualizações feitas lá já
+  aparecem na próxima busca — sem precisar reimportar nada, e sem nenhum
+  dado pessoal do efetivo versionado neste repositório.
+  `importarMilitaresCsv` (`AppContext`) continua disponível para importar
+  um arquivo CSV próprio de outra UBM — ver `src/lib/csvMilitares.ts` para
+  o layout de colunas esperado —, só não está mais ligado a um botão na
+  tela.
 - Escala (núcleo do sistema, `src/lib/escala.ts`):
   - Ordinária: geração automática round-robin por função (garante folga
     igual entre militares da mesma função) + Kanban semanal/mensal/anual +
@@ -57,9 +67,10 @@ login), mas autenticação e persistência ficam desligadas.
 
 ## Pendências conhecidas (para alinhar antes de produção)
 
-1. **Layout real da planilha de efetivo**: `src/lib/csvMilitares.ts` assume
-   colunas Nome/Posto-Graduação/Matrícula por cabeçalho; ajustar os aliases
-   ou o parser quando houver um arquivo real de exemplo.
+1. ~~Layout real da planilha de efetivo~~ — resolvido: `src/lib/csvMilitares.ts`
+   já reconhece o cabeçalho real (`nome`, `matricula`/`MF`, `cargo`) da
+   planilha "Militares e matrícula bm", usada ao vivo pela busca do módulo
+   Efetivo (ver item acima).
 2. **Permuta**: o formulário em Solicitações ainda não permite escolher a
    escala específica do indicado a ser trocada (`escalaDestinoId`) — hoje a
    aprovação da permuta só move a vaga do solicitante para o indicado. Para
