@@ -10,6 +10,7 @@ import Escala from './pages/Escala';
 import Solicitacoes from './pages/Solicitacoes';
 import Afastamentos from './pages/Afastamentos';
 import Presenca from './pages/Presenca';
+import AutorizacaoSubstituicao from './pages/AutorizacaoSubstituicao';
 import Relatorios from './pages/Relatorios';
 import Estatisticas from './pages/Estatisticas';
 import Usuarios from './pages/Usuarios';
@@ -32,6 +33,7 @@ export default function App() {
                 <Route path="solicitacoes" element={<Solicitacoes />} />
                 <Route path="afastamentos" element={<Afastamentos />} />
                 <Route path="presenca" element={<Presenca />} />
+                <Route path="autorizacao-substituicao" element={<AutorizacaoSubstituicao />} />
                 <Route path="relatorios" element={<Relatorios />} />
                 <Route path="estatisticas" element={<Estatisticas />} />
                 <Route path="usuarios" element={<Usuarios />} />

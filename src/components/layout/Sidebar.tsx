@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Building2,
   Menu,
+  FileSignature,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useApp } from '../../context/AppContext';
@@ -42,6 +43,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
     { name: 'Solicitações', href: '/sistema/solicitacoes', icon: Send, show: temUbm },
     { name: 'Afastamentos', href: '/sistema/afastamentos', icon: UserX, show: isGestao },
     { name: 'Presença', href: '/sistema/presenca', icon: ClipboardCheck, show: temUbm },
+    { name: 'Autorização de Substituição', href: '/sistema/autorizacao-substituicao', icon: FileSignature, show: temUbm },
     { name: 'Relatórios', href: '/sistema/relatorios', icon: FileBarChart, show: isGestao },
     { name: 'Estatísticas', href: '/sistema/estatisticas', icon: PieChart, show: isGestao },
     { name: 'Usuários', href: '/sistema/usuarios', icon: ShieldCheck, show: isGestao || isMaster },
