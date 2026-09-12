@@ -1,0 +1,123 @@
+rules_version = '2';
+
+// Regras do Sistema de Jornada de Trabalho — CBMPA
+//
+// Deploy (requer Firebase CLI autenticado):
+//   firebase deploy --only firestore:rules
+//
+// Modelo: todo usuário autenticado e ATIVO enxerga os dados operacionais da
+// própria UBM; a coleção `usuarios` (aprovação de acesso e mudança de
+// papéis) é restrita a quem tem o papel 'comandante' ou 'escalante', com uma
+// exceção controlada para autocadastro.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function autenticado() {
+      return request.auth != null;
+    }
+
+    function perfilDoc() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function ativo() {
+      return autenticado()
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        && perfilDoc().ativo == true;
+    }
+
+    function temPapel(papel) {
+      return ativo() && (papel in perfilDoc().papeis);
+    }
+
+    function gestao() {
+      return temPapel('comandante') || temPapel('escalante');
+    }
+
+    match /usuarios/{usuarioId} {
+      allow read: if autenticado();
+
+      // Autocadastro ("Solicitar acesso"): só o próprio UID, sempre inativo,
+      // sem papéis de comandante/escalante e sem senha no documento.
+      allow create: if autenticado()
+        && request.auth.uid == usuarioId
+        && request.resource.data.ativo == false
+        && !('comandante' in request.resource.data.papeis)
+        && !('escalante' in request.resource.data.papeis)
+        && !('senha' in request.resource.data);
+
+      // Comandante/Escalante cria, aprova, muda papéis e remove.
+      allow create, update: if gestao() && !('senha' in request.resource.data);
+      allow delete: if gestao();
+
+      // O próprio usuário pode ajustar dados de contato, nunca papéis/ativo.
+      allow update: if autenticado()
+        && request.auth.uid == usuarioId
+        && request.resource.data.papeis == resource.data.papeis
+        && request.resource.data.ativo == resource.data.ativo
+        && !('senha' in request.resource.data);
+    }
+
+    match /ubms/{documento} {
+      allow read: if ativo();
+      allow write: if gestao();
+    }
+    match /militares/{documento} {
+      allow read: if ativo();
+      allow write: if gestao();
+    }
+    match /escalas_ordinarias/{documento} {
+      allow read: if ativo();
+      allow write: if gestao();
+    }
+    match /escalas_extraordinarias/{documento} {
+      allow read: if ativo();
+      allow write: if gestao();
+    }
+    match /escalas_diferenciadas/{documento} {
+      allow read: if ativo();
+      // Qualquer militar ativo pode indicar/remover sua própria escala
+      // diferenciada; a alteração pelo escalante passa por
+      // solicitacoes_alteracao_diferenciada (nunca escreve aqui direto,
+      // exceto para aplicar uma alteração já aprovada, via delete).
+      allow write: if ativo();
+    }
+    match /solicitacoes_alteracao_diferenciada/{documento} {
+      allow read: if ativo();
+      allow create: if temPapel('escalante');
+      allow update: if temPapel('comandante');
+    }
+    match /afastamentos/{documento} {
+      allow read: if ativo();
+      allow write: if gestao();
+    }
+    match /presencas/{documento} {
+      allow read: if ativo();
+      allow write: if ativo();
+    }
+    match /solicitacoes_servico/{documento} {
+      allow read: if ativo();
+      allow write: if ativo();
+    }
+    match /alertas/{documento} {
+      allow read: if ativo() && resource.data.usuarioId == request.auth.uid;
+      allow create: if ativo();
+      allow update: if ativo() && resource.data.usuarioId == request.auth.uid;
+    }
+
+    // Log de acesso: criação aberta (login mal-sucedido acontece antes de
+    // qualquer sessão válida), restrita ao formato mínimo; leitura só para
+    // comandante/escalante.
+    match /logs_acesso/{documento} {
+      allow read: if gestao();
+      allow create: if request.resource.data.email is string
+        && request.resource.data.sucesso is bool
+        && request.resource.data.keys().hasOnly(['userId', 'email', 'sucesso', 'dataHora', 'userAgent']);
+      allow update, delete: if false;
+    }
+
+    match /{documento=**} {
+      allow read, write: if false;
+    }
+  }
+}

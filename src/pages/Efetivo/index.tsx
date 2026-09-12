@@ -1,0 +1,259 @@
+import { useRef, useState } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
+import Papa from 'papaparse';
+import { Search, UserPlus, Upload, Trash2, Edit2, X, ArrowLeftRight } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
+import { mapLinhaMilitar, type LinhaMilitar } from '../../lib/csvMilitares';
+import { FUNCAO_LABELS, FuncaoOperacional, Militar, temPapel } from '../../types';
+
+const TODAS_FUNCOES = Object.keys(FUNCAO_LABELS) as FuncaoOperacional[];
+
+export default function Efetivo() {
+  const { usuarioAtual, militares, ubms, addMilitar, updateMilitar, deleteMilitar, importarMilitaresCsv, transferirMilitarDeUbm } = useApp();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const [busca, setBusca] = useState('');
+  const [militarEditando, setMilitarEditando] = useState<Militar | null>(null);
+  const [isNovoOpen, setIsNovoOpen] = useState(false);
+  const [resultadoImportacao, setResultadoImportacao] = useState<string | null>(null);
+  const [novoMilitarForm, setNovoMilitarForm] = useState({ nome: '', posto: '', matricula: '' });
+  const [transferindo, setTransferindo] = useState<Militar | null>(null);
+  const [novaUbmId, setNovaUbmId] = useState('');
+
+  if (!temPapel(usuarioAtual, 'comandante') && !temPapel(usuarioAtual, 'escalante')) {
+    return <div className="p-8 text-center text-gray-500">Você não tem permissão para acessar este módulo.</div>;
+  }
+
+  const ubmId = usuarioAtual!.ubmId;
+  const militaresDaUbm = militares.filter((m) => m.ubmId === ubmId);
+  const filtrados = militaresDaUbm.filter(
+    (m) => m.nome.toLowerCase().includes(busca.toLowerCase()) || m.matricula.toLowerCase().includes(busca.toLowerCase()),
+  );
+
+  const handleImportar = (e: ChangeEvent<HTMLInputElement>) => {
+    const arquivo = e.target.files?.[0];
+    if (!arquivo) return;
+
+    Papa.parse<Record<string, string>>(arquivo, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (resultado) => {
+        const linhas: LinhaMilitar[] = resultado.data
+          .map((linha) => mapLinhaMilitar(linha))
+          .filter((linha): linha is LinhaMilitar => linha !== null);
+        try {
+          const { criados, ignorados } = await importarMilitaresCsv(ubmId, linhas);
+          setResultadoImportacao(`Importação concluída: ${criados} militares cadastrados, ${ignorados} linhas ignoradas.`);
+        } catch (erro) {
+          setResultadoImportacao(erro instanceof Error ? erro.message : 'Erro ao importar planilha.');
+        }
+      },
+    });
+    e.target.value = '';
+  };
+
+  const handleCriarManual = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!novoMilitarForm.nome) return;
+    await addMilitar({
+      nome: novoMilitarForm.nome,
+      posto: novoMilitarForm.posto,
+      matricula: novoMilitarForm.matricula,
+      ubmId,
+      funcoes: [],
+      ativo: true,
+      origemCadastro: 'manual',
+    });
+    setNovoMilitarForm({ nome: '', posto: '', matricula: '' });
+    setIsNovoOpen(false);
+  };
+
+  const alternarFuncao = (militar: Militar, funcao: FuncaoOperacional) => {
+    const jaTem = militar.funcoes.includes(funcao);
+    const novasFuncoes = jaTem ? militar.funcoes.filter((f) => f !== funcao) : [...militar.funcoes, funcao];
+    updateMilitar(militar.id, { funcoes: novasFuncoes });
+    setMilitarEditando((atual) => (atual ? { ...atual, funcoes: novasFuncoes } : atual));
+  };
+
+  const confirmarTransferencia = async () => {
+    if (!transferindo || !novaUbmId) return;
+    await transferirMilitarDeUbm(transferindo.id, novaUbmId);
+    setTransferindo(null);
+    setNovaUbmId('');
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Efetivo</h1>
+          <p className="mt-1 text-sm text-gray-500">Cadastro de militares, importação de planilha e atribuição de funções.</p>
+        </div>
+        <div className="flex gap-2">
+          <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImportar} />
+          <button
+            onClick={() => inputRef.current?.click()}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          >
+            <Upload className="-ml-1 mr-2 h-5 w-5" /> Importar Planilha
+          </button>
+          <button
+            onClick={() => setIsNovoOpen(true)}
+            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800"
+          >
+            <UserPlus className="-ml-1 mr-2 h-5 w-5" /> Novo Militar
+          </button>
+        </div>
+      </div>
+
+      {resultadoImportacao && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 flex justify-between">
+          {resultadoImportacao}
+          <button onClick={() => setResultadoImportacao(null)}><X className="w-4 h-4" /></button>
+        </div>
+      )}
+
+      <div className="bg-white shadow-sm rounded-lg border border-gray-200">
+        <div className="p-4 border-b border-gray-200">
+          <div className="relative max-w-md">
+            <div className="pointer-events-none absolute inset-y-0 left-0 pl-3 flex items-center">
+              <Search className="h-5 w-5 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              className="block w-full rounded-md border-gray-300 pl-10 focus:border-red-500 focus:ring-red-500 sm:text-sm py-2 border"
+              placeholder="Buscar por nome ou matrícula..."
+            />
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Militar</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Funções</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="relative px-6 py-3"><span className="sr-only">Ações</span></th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filtrados.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-10 text-center text-gray-500">Nenhum militar encontrado.</td>
+                </tr>
+              ) : (
+                filtrados.map((m) => (
+                  <tr key={m.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{m.posto} {m.nome}</div>
+                      <div className="text-sm text-gray-500">Matr. {m.matricula || '—'}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-wrap gap-1">
+                        {m.funcoes.length === 0 ? (
+                          <span className="text-xs text-gray-400">Nenhuma função atribuída</span>
+                        ) : (
+                          m.funcoes.map((f) => (
+                            <span key={f} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700">
+                              {FUNCAO_LABELS[f]}
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${m.ativo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {m.ativo ? 'Ativo' : 'Inativo'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
+                      <button onClick={() => setMilitarEditando(m)} className="text-red-600 hover:text-red-900" title="Editar funções">
+                        <Edit2 className="w-4 h-4 inline" />
+                      </button>
+                      <button onClick={() => setTransferindo(m)} className="text-gray-500 hover:text-gray-800" title="Transferir de UBM">
+                        <ArrowLeftRight className="w-4 h-4 inline" />
+                      </button>
+                      <button onClick={() => deleteMilitar(m.id)} className="text-gray-400 hover:text-red-600" title="Excluir">
+                        <Trash2 className="w-4 h-4 inline" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {militarEditando && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 relative">
+            <button onClick={() => setMilitarEditando(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-500">
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-lg font-medium text-gray-900 mb-1">{militarEditando.posto} {militarEditando.nome}</h3>
+            <p className="text-sm text-gray-500 mb-4">Funções operacionais (um militar pode acumular mais de uma)</p>
+            <div className="space-y-2">
+              {TODAS_FUNCOES.map((f) => (
+                <label key={f} className="flex items-center gap-2 text-sm text-gray-800">
+                  <input type="checkbox" checked={militarEditando.funcoes.includes(f)} onChange={() => alternarFuncao(militarEditando, f)} className="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded" />
+                  {FUNCAO_LABELS[f]}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isNovoOpen && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 relative">
+            <button onClick={() => setIsNovoOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-500">
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Novo Militar (cadastro manual)</h3>
+            <form onSubmit={handleCriarManual} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
+                <input required value={novoMilitarForm.nome} onChange={(e) => setNovoMilitarForm({ ...novoMilitarForm, nome: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Posto/Graduação</label>
+                <input value={novoMilitarForm.posto} onChange={(e) => setNovoMilitarForm({ ...novoMilitarForm, posto: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Matrícula</label>
+                <input value={novoMilitarForm.matricula} onChange={(e) => setNovoMilitarForm({ ...novoMilitarForm, matricula: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+              </div>
+              <div className="mt-6 flex justify-end space-x-3">
+                <button type="button" onClick={() => setIsNovoOpen(false)} className="px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Cancelar</button>
+                <button type="submit" className="px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700">Cadastrar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {transferindo && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6 relative">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Transferir {transferindo.nome} de UBM</h3>
+            <select value={novaUbmId} onChange={(e) => setNovaUbmId(e.target.value)} className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm mb-4">
+              <option value="">Selecione a nova UBM</option>
+              {ubms.filter((u) => u.id !== transferindo.ubmId).map((u) => (
+                <option key={u.id} value={u.id}>{u.sigla} - {u.nome}</option>
+              ))}
+            </select>
+            <div className="flex justify-end space-x-3">
+              <button onClick={() => setTransferindo(null)} className="px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Cancelar</button>
+              <button onClick={confirmarTransferencia} className="px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700">Transferir</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

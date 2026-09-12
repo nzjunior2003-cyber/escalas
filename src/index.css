@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+/* Modo escuro ativado por classe (.dark na <html>), controlado pelo botão
+   de alternância — em vez de seguir a preferência do sistema operacional. */
+@custom-variant dark (&:where(.dark, .dark *));
