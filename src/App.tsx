@@ -13,6 +13,7 @@ import Presenca from './pages/Presenca';
 import Relatorios from './pages/Relatorios';
 import Estatisticas from './pages/Estatisticas';
 import Usuarios from './pages/Usuarios';
+import Ubms from './pages/Ubms';
 import Alertas from './pages/Alertas';
 
 export default function App() {
@@ -34,6 +35,7 @@ export default function App() {
                 <Route path="relatorios" element={<Relatorios />} />
                 <Route path="estatisticas" element={<Estatisticas />} />
                 <Route path="usuarios" element={<Usuarios />} />
+                <Route path="ubms" element={<Ubms />} />
                 <Route path="alertas" element={<Alertas />} />
               </Route>
             </Route>

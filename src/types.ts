@@ -1,21 +1,33 @@
 // ---------------------------------------------------------------------------
 // Papéis de acesso (RBAC). Comandante e Escalante podem coexistir na mesma
 // pessoa (mesmo login com os dois papéis) — por isso `papeis` é um array, e
-// não um campo único. Um usuário sem 'comandante'/'escalante' é tratado como
-// Militar (usuário comum): só consulta a própria escala e faz solicitações.
+// não um campo único. Um usuário sem 'comandante'/'escalante'/'master' é
+// tratado como Militar (usuário comum): só consulta a própria escala e faz
+// solicitações.
+//
+// 'master' é o único papel sem vínculo com uma UBM específica: é quem define
+// quem é Comandante/Escalante de cada UBM (esses podem mudar) e cadastra as
+// próprias UBMs — só o master atribui ou remove os papéis 'master',
+// 'comandante' e 'escalante' de qualquer usuário. Um usuário master tem
+// `ubmId: ''` (nenhuma UBM), já que atua no CBMPA como um todo.
 // ---------------------------------------------------------------------------
-export type Papel = 'comandante' | 'escalante' | 'militar';
+export type Papel = 'master' | 'comandante' | 'escalante' | 'militar';
 
 export const PAPEL_LABELS: Record<Papel, string> = {
+  master: 'Master (CBMPA)',
   comandante: 'Comandante da UBM',
   escalante: 'Escalante',
   militar: 'Militar (usuário comum)',
 };
 
+/** Papéis cuja atribuição é exclusiva do master (ver nota acima). */
+export const PAPEIS_RESTRITOS_AO_MASTER: Papel[] = ['master', 'comandante', 'escalante'];
+
 export interface Usuario {
   id: string;
   nome: string;
   email: string;
+  /** Vazio ('') para o papel 'master', que não pertence a nenhuma UBM específica. */
   ubmId: string;
   papeis: Papel[];
   /** Vínculo com o cadastro de efetivo (Militar), quando o usuário também é escalado. */

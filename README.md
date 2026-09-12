@@ -25,14 +25,40 @@ login), mas autenticação e persistência ficam desligadas.
 
 - Um militar pode acumular mais de uma função (`Militar.funcoes: FuncaoOperacional[]`).
 - Comandante da UBM e Escalante podem ser a mesma pessoa: `Usuario.papeis`
-  é um array (`'comandante' | 'escalante' | 'militar'`), não um campo único.
+  é um array (`'master' | 'comandante' | 'escalante' | 'militar'`), não um
+  campo único.
 - Um militar pode ser transferido de UBM: `Militar.historicoUbm` guarda o
   histórico completo de vínculos.
+- Existe um papel **master**, único para todo o CBMPA (não pertence a
+  nenhuma UBM — `Usuario.ubmId` fica `''`): só ele cadastra as UBMs
+  (módulo **UBMs**) e atribui/remove os papéis `master`, `comandante` e
+  `escalante` de qualquer usuário, em qualquer UBM (módulo **Usuários**,
+  visão de todas as unidades). Comandante/Escalante continuam aprovando e
+  gerenciando os usuários "militar" da própria UBM, mas não podem
+  promover ninguém a Comandante/Escalante — quem ocupa esses papéis pode
+  mudar, e essa decisão é do master. `firestore.rules` aplica essa mesma
+  regra no servidor (`papeisRestritos`, `gestaoDaUbm`, `podeGerenciarUbm`).
+
+### Bootstrap do primeiro usuário
+
+Como o autocadastro sempre nasce `ativo: false` e `papeis: ['militar']`, é
+preciso criar o **primeiro usuário master** manualmente, direto no Firebase
+Console/Firestore (coleção `usuarios`, id = UID do Firebase Auth):
+
+```json
+{ "nome": "...", "email": "...", "ubmId": "", "papeis": ["master"], "ativo": true }
+```
+
+A partir daí, esse master cadastra as UBMs e define quem é Comandante/
+Escalante de cada uma pelo próprio app — é um bootstrap único para todo o
+CBMPA, não um por UBM.
 
 ## O que está implementado neste scaffold
 
-- Autenticação, aprovação de cadastro e papéis (módulo Usuários), replicando
-  o padrão do Controle de Processos.
+- Autenticação, aprovação de cadastro e papéis (módulo Usuários — todas as
+  UBMs para o master, só a própria para Comandante/Escalante), replicando o
+  padrão do Controle de Processos. Módulo UBMs (cadastro de unidades),
+  exclusivo do master.
 - Efetivo: cadastro manual, atribuição de múltiplas funções por militar e
   "Adicionar da planilha" — um autocomplete (`MilitarPlanilhaAutocomplete`)
   que busca ao vivo, por nome/posto/matrícula, na planilha pública de

@@ -9,6 +9,7 @@ import {
   FileBarChart,
   PieChart,
   ShieldCheck,
+  Building2,
   Menu,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -24,6 +25,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
   const location = useLocation();
   const { usuarioAtual } = useApp();
 
+  const isMaster = temPapel(usuarioAtual, 'master');
   const isComandante = temPapel(usuarioAtual, 'comandante');
   const isEscalante = temPapel(usuarioAtual, 'escalante');
   const isGestao = isComandante || isEscalante;
@@ -31,13 +33,14 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
   const navigation = [
     { name: 'Início', href: '/sistema', icon: Home, show: true },
     { name: 'Efetivo', href: '/sistema/efetivo', icon: Users, show: isGestao },
-    { name: 'Escala', href: '/sistema/escala', icon: CalendarDays, show: true },
-    { name: 'Solicitações', href: '/sistema/solicitacoes', icon: Send, show: true },
+    { name: 'Escala', href: '/sistema/escala', icon: CalendarDays, show: !isMaster },
+    { name: 'Solicitações', href: '/sistema/solicitacoes', icon: Send, show: !isMaster },
     { name: 'Afastamentos', href: '/sistema/afastamentos', icon: UserX, show: isGestao },
-    { name: 'Presença', href: '/sistema/presenca', icon: ClipboardCheck, show: true },
+    { name: 'Presença', href: '/sistema/presenca', icon: ClipboardCheck, show: !isMaster },
     { name: 'Relatórios', href: '/sistema/relatorios', icon: FileBarChart, show: isGestao },
     { name: 'Estatísticas', href: '/sistema/estatisticas', icon: PieChart, show: isGestao },
-    { name: 'Usuários', href: '/sistema/usuarios', icon: ShieldCheck, show: isGestao },
+    { name: 'Usuários', href: '/sistema/usuarios', icon: ShieldCheck, show: isGestao || isMaster },
+    { name: 'UBMs', href: '/sistema/ubms', icon: Building2, show: isMaster },
   ].filter((item) => item.show);
 
   return (

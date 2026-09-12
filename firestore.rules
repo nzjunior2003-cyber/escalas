@@ -7,8 +7,11 @@ rules_version = '2';
 //
 // Modelo: todo usuário autenticado e ATIVO enxerga os dados operacionais da
 // própria UBM; a coleção `usuarios` (aprovação de acesso e mudança de
-// papéis) é restrita a quem tem o papel 'comandante' ou 'escalante', com uma
-// exceção controlada para autocadastro.
+// papéis) é restrita a quem tem o papel 'comandante' ou 'escalante' — e só
+// dentro da própria UBM —, com uma exceção controlada para autocadastro.
+// Os papéis 'master', 'comandante' e 'escalante' só podem ser atribuídos ou
+// removidos pelo master: Comandante/Escalante de uma UBM podem mudar, e é o
+// master quem decide isso, junto com o cadastro das próprias UBMs.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -30,25 +33,49 @@ service cloud.firestore {
       return ativo() && (papel in perfilDoc().papeis);
     }
 
-    function gestao() {
-      return temPapel('comandante') || temPapel('escalante');
+    function master() {
+      return temPapel('master');
+    }
+
+    // Comandante ou Escalante ATIVO da UBM informada (não de qualquer UBM).
+    function gestaoDaUbm(ubmId) {
+      return (temPapel('comandante') || temPapel('escalante')) && perfilDoc().ubmId == ubmId;
+    }
+
+    function papeisRestritos(papeis) {
+      return papeis.hasAny(['master', 'comandante', 'escalante']);
+    }
+
+    // Master gerencia qualquer UBM; Comandante/Escalante só a própria.
+    function podeGerenciarUbm(ubmId) {
+      return master() || gestaoDaUbm(ubmId);
     }
 
     match /usuarios/{usuarioId} {
       allow read: if autenticado();
 
       // Autocadastro ("Solicitar acesso"): só o próprio UID, sempre inativo,
-      // sem papéis de comandante/escalante e sem senha no documento.
+      // sempre como 'militar' e sem senha no documento.
       allow create: if autenticado()
         && request.auth.uid == usuarioId
         && request.resource.data.ativo == false
-        && !('comandante' in request.resource.data.papeis)
-        && !('escalante' in request.resource.data.papeis)
+        && request.resource.data.papeis == ['militar']
         && !('senha' in request.resource.data);
 
-      // Comandante/Escalante cria, aprova, muda papéis e remove.
-      allow create, update: if gestao() && !('senha' in request.resource.data);
-      allow delete: if gestao();
+      // Master: controle total (é quem define/remove master/comandante/escalante).
+      allow create, update, delete: if master() && !('senha' in request.resource.data);
+
+      // Comandante/Escalante: só dentro da própria UBM, e nunca atribuindo
+      // (nem removendo de quem já tem) papel de master/comandante/escalante —
+      // isso é decisão exclusiva do master.
+      allow create: if gestaoDaUbm(request.resource.data.ubmId)
+        && !('senha' in request.resource.data)
+        && !papeisRestritos(request.resource.data.papeis);
+      allow update: if gestaoDaUbm(resource.data.ubmId)
+        && !papeisRestritos(resource.data.papeis)
+        && !papeisRestritos(request.resource.data.papeis)
+        && !('senha' in request.resource.data);
+      allow delete: if gestaoDaUbm(resource.data.ubmId) && !papeisRestritos(resource.data.papeis);
 
       // O próprio usuário pode ajustar dados de contato, nunca papéis/ativo.
       allow update: if autenticado()
@@ -58,21 +85,26 @@ service cloud.firestore {
         && !('senha' in request.resource.data);
     }
 
+    // UBMs são cadastradas pelo master — Comandante/Escalante não criam
+    // nem removem UBMs, só operam dentro da que já pertencem.
     match /ubms/{documento} {
       allow read: if ativo();
-      allow write: if gestao();
+      allow write: if master();
     }
     match /militares/{documento} {
       allow read: if ativo();
-      allow write: if gestao();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
     match /escalas_ordinarias/{documento} {
       allow read: if ativo();
-      allow write: if gestao();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
     match /escalas_extraordinarias/{documento} {
       allow read: if ativo();
-      allow write: if gestao();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
     match /escalas_diferenciadas/{documento} {
       allow read: if ativo();
@@ -84,12 +116,13 @@ service cloud.firestore {
     }
     match /solicitacoes_alteracao_diferenciada/{documento} {
       allow read: if ativo();
-      allow create: if temPapel('escalante');
-      allow update: if temPapel('comandante');
+      allow create: if temPapel('escalante') || master();
+      allow update: if temPapel('comandante') || master();
     }
     match /afastamentos/{documento} {
       allow read: if ativo();
-      allow write: if gestao();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
     match /presencas/{documento} {
       allow read: if ativo();
@@ -107,9 +140,9 @@ service cloud.firestore {
 
     // Log de acesso: criação aberta (login mal-sucedido acontece antes de
     // qualquer sessão válida), restrita ao formato mínimo; leitura só para
-    // comandante/escalante.
+    // o master (trilha de auditoria única para o CBMPA).
     match /logs_acesso/{documento} {
-      allow read: if gestao();
+      allow read: if master();
       allow create: if request.resource.data.email is string
         && request.resource.data.sucesso is bool
         && request.resource.data.keys().hasOnly(['userId', 'email', 'sucesso', 'dataHora', 'userAgent']);
