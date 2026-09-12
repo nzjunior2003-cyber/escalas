@@ -62,8 +62,10 @@ login), mas autenticação e persistência ficam desligadas.
   da guarnição do dia.
 - Estatísticas: gráficos de reforços extraordinários, substituições/
   permutas, presença e folgas acumuladas por militar.
-- Relatórios: folha de impressão (Ctrl+P → Salvar como PDF) para a escala
-  ordinária e extraordinária semanal, no padrão visual institucional.
+- Relatórios: geração real de PDF (download direto, via `jsPDF` +
+  `jspdf-autotable` — `src/lib/pdfEscala.ts`) para a escala ordinária e
+  extraordinária semanal, no padrão visual institucional (brasão, cabeçalho
+  da UBM, tabela por dia).
 
 ## Pendências conhecidas (para alinhar antes de produção)
 

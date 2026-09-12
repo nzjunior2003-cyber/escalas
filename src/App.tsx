@@ -11,7 +11,6 @@ import Solicitacoes from './pages/Solicitacoes';
 import Afastamentos from './pages/Afastamentos';
 import Presenca from './pages/Presenca';
 import Relatorios from './pages/Relatorios';
-import ImpressaoEscala from './pages/Relatorios/ImpressaoEscala';
 import Estatisticas from './pages/Estatisticas';
 import Usuarios from './pages/Usuarios';
 import Alertas from './pages/Alertas';
@@ -25,9 +24,6 @@ export default function App() {
             <Route path="/" element={<PublicHome />} />
 
             <Route path="/sistema" element={<ProtectedRoute />}>
-              {/* Sem o Layout (sidebar/topo) — pensada pra impressão limpa. */}
-              <Route path="relatorios/imprimir" element={<ImpressaoEscala />} />
-
               <Route element={<Layout />}>
                 <Route index element={<SistemaHome />} />
                 <Route path="efetivo" element={<Efetivo />} />
