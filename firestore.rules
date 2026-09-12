@@ -85,6 +85,21 @@ service cloud.firestore {
         && !('senha' in request.resource.data);
     }
 
+    // Índice público mínimo matrícula -> e-mail, para permitir login por
+    // matrícula (a coleção `usuarios` continua exigindo autenticação para
+    // leitura — expor só isso evita vazar nome/papéis/UBM de todo o efetivo).
+    // "Primeiro a registrar" (create) e imutável depois (sem update/delete):
+    // só quem está autenticado com aquele e-mail pode reivindicar a
+    // matrícula — nem o próprio usuário nem um admin conseguem sobrescrever
+    // uma matrícula já vinculada a outra conta.
+    match /matriculas/{matricula} {
+      allow read: if true;
+      allow create: if autenticado()
+        && request.auth.token.email == request.resource.data.email
+        && request.resource.data.keys().hasOnly(['email']);
+      allow update, delete: if false;
+    }
+
     // UBMs são cadastradas pelo master — Comandante/Escalante não criam
     // nem removem UBMs, só operam dentro da que já pertencem. Leitura
     // pública (sem exigir autenticação): a tela de "Solicitar Acesso"

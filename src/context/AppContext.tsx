@@ -41,6 +41,7 @@ import {
 } from '../lib/firebase';
 import { enviarEmail } from '../lib/emailService';
 import { gerarEscalaOrdinaria, sugerirMilitarExtraordinario } from '../lib/escala';
+import { buscarMilitarPorMatricula, normalizarMatricula } from '../lib/planilhaEfetivo';
 import type { LinhaMilitar } from '../lib/csvMilitares';
 import {
   Afastamento,
@@ -78,10 +79,23 @@ interface AppContextData {
   carregandoAuth: boolean;
   firebaseConfigurado: boolean;
 
-  login: (email: string, senha?: string) => Promise<void>;
+  /** `identificador` aceita e-mail ou matrícula (resolvida via coleção `matriculas`). */
+  login: (identificador: string, senha?: string) => Promise<void>;
   logout: () => Promise<void>;
   solicitarAcesso: (dados: { nome: string; email: string; senha: string; ubmId: string; cargo?: string }) => Promise<void>;
   enviarResetSenha: (email: string) => Promise<void>;
+  /** Confere a matrícula contra a planilha ao vivo do efetivo do CBMPA. */
+  validarMatriculaEfetivo: (matricula: string) => Promise<LinhaMilitar | null>;
+  /** Completa o primeiro acesso de um militar já validado pela matrícula. */
+  primeiroAcessoPorMatricula: (dados: {
+    matricula: string;
+    nomeCompleto: string;
+    cargo?: string;
+    nomeGuerra: string;
+    email: string;
+    senha: string;
+    ubmId: string;
+  }) => Promise<void>;
 
   addUbm: (dados: Omit<Ubm, 'id'>) => Promise<string>;
   updateUbm: (id: string, dados: Partial<Ubm>) => Promise<void>;
@@ -270,11 +284,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const login = useCallback(
-    async (email: string, senha?: string) => {
+    async (identificador: string, senha?: string) => {
       let userIdParaLog: string | null = null;
+      let email = identificador;
       try {
         const auth = requireFirebaseAuth();
         const db = requireDb();
+
+        if (!identificador.includes('@')) {
+          const chave = normalizarMatricula(identificador);
+          const matriculaSnap = chave ? await getDoc(doc(db, 'matriculas', chave)) : null;
+          if (!matriculaSnap?.exists()) {
+            throw new Error('Matrícula não encontrada. Verifique o número ou use seu e-mail para entrar.');
+          }
+          email = (matriculaSnap.data() as { email: string }).email;
+        }
+
         const credencial = await signInWithEmailAndPassword(auth, email, senha ?? '');
         userIdParaLog = credencial.user.uid;
         const perfilSnap = await getDoc(doc(db, 'usuarios', credencial.user.uid));
@@ -326,6 +351,34 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [],
   );
 
+  /** Notifica por e-mail o(s) Comandante/Escalante de uma UBM sobre uma nova solicitação de acesso. */
+  const notificarAprovadoresDaUbm = useCallback(
+    async (ubmId: string, nome: string, email: string, cargo?: string) => {
+      try {
+        const db = requireDb();
+        const aprovadoresSnap = await getDocs(
+          query(collection(db, 'usuarios'), where('ubmId', '==', ubmId)),
+        );
+        const aprovadores = aprovadoresSnap.docs
+          .map((d) => ({ ...(d.data() as object), id: d.id }) as Usuario)
+          .filter((u) => u.papeis?.includes('comandante') || u.papeis?.includes('escalante'));
+
+        await Promise.all(
+          aprovadores.map((destinatario) =>
+            enviarEmail({
+              to: destinatario.email,
+              subject: `Nova solicitação de acesso — ${nome}`,
+              html: `<h2>Nova Solicitação de Acesso</h2><p><b>${nome}</b>${cargo ? ` (${cargo})` : ''} solicitou acesso ao Sistema de Jornada de Trabalho com o e-mail <b>${email}</b>.</p><p>Acesse o módulo <b>Usuários</b> para revisar e ativar o acesso.</p>`,
+            }).catch((erroEnvio) => console.error('Erro ao notificar aprovador:', erroEnvio)),
+          ),
+        );
+      } catch (erroNotificacao) {
+        console.error('Erro ao buscar aprovadores para notificar solicitação de acesso:', erroNotificacao);
+      }
+    },
+    [],
+  );
+
   const solicitarAcesso = useCallback(
     async ({ nome, email, senha, ubmId, cargo }: { nome: string; email: string; senha: string; ubmId: string; cargo?: string }) => {
       try {
@@ -343,33 +396,89 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           criado_em: new Date().toISOString(),
         });
 
-        try {
-          const aprovadoresSnap = await getDocs(
-            query(collection(db, 'usuarios'), where('ubmId', '==', ubmId)),
-          );
-          const aprovadores = aprovadoresSnap.docs
-            .map((d) => ({ ...(d.data() as object), id: d.id }) as Usuario)
-            .filter((u) => u.papeis?.includes('comandante') || u.papeis?.includes('escalante'));
-
-          await Promise.all(
-            aprovadores.map((destinatario) =>
-              enviarEmail({
-                to: destinatario.email,
-                subject: `Nova solicitação de acesso — ${nome}`,
-                html: `<h2>Nova Solicitação de Acesso</h2><p><b>${nome}</b>${cargo ? ` (${cargo})` : ''} solicitou acesso ao Sistema de Jornada de Trabalho com o e-mail <b>${email}</b>.</p><p>Acesse o módulo <b>Usuários</b> para revisar e ativar o acesso.</p>`,
-              }).catch((erroEnvio) => console.error('Erro ao notificar aprovador:', erroEnvio)),
-            ),
-          );
-        } catch (erroNotificacao) {
-          console.error('Erro ao buscar aprovadores para notificar solicitação de acesso:', erroNotificacao);
-        }
-
+        await notificarAprovadoresDaUbm(ubmId, nome, email, cargo);
         await signOut(auth);
       } catch (erro) {
         throw new Error(mensagemErroAuth(erro));
       }
     },
-    [],
+    [notificarAprovadoresDaUbm],
+  );
+
+  const validarMatriculaEfetivo = useCallback(async (matricula: string) => {
+    return buscarMilitarPorMatricula(matricula);
+  }, []);
+
+  /**
+   * Primeiro acesso por matrícula: a matrícula já foi validada contra a
+   * planilha ao vivo (ver `validarMatriculaEfetivo`) antes de chegar aqui.
+   * Cria a conta e o perfil (sempre inativo, papel 'militar' — igual ao
+   * autocadastro por UBM) e registra `matriculas/{matricula}` para permitir
+   * login por matrícula depois. Nunca envia a senha por e-mail: a pessoa
+   * acabou de digitá-la e confirmá-la duas vezes, só confirma o cadastro.
+   */
+  const primeiroAcessoPorMatricula = useCallback(
+    async ({
+      matricula,
+      nomeCompleto,
+      cargo,
+      nomeGuerra,
+      email,
+      senha,
+      ubmId,
+    }: {
+      matricula: string;
+      nomeCompleto: string;
+      cargo?: string;
+      nomeGuerra: string;
+      email: string;
+      senha: string;
+      ubmId: string;
+    }) => {
+      try {
+        const auth = requireFirebaseAuth();
+        const db = requireDb();
+        const credencial = await createUserWithEmailAndPassword(auth, email, senha);
+
+        await setDoc(
+          doc(db, 'usuarios', credencial.user.uid),
+          semIndefinidosParaCriar({
+            nome: nomeCompleto,
+            nomeGuerra,
+            matricula,
+            cargo,
+            email,
+            ubmId,
+            papeis: ['militar'],
+            ativo: false,
+            criado_em: new Date().toISOString(),
+          }),
+        );
+
+        try {
+          await setDoc(doc(db, 'matriculas', normalizarMatricula(matricula)), { email });
+        } catch (erroMatricula) {
+          // Não impede o cadastro — sem isso, a pessoa ainda consegue entrar pelo e-mail.
+          console.error('Erro ao registrar matrícula para login:', erroMatricula);
+        }
+
+        try {
+          await enviarEmail({
+            to: email,
+            subject: 'Cadastro recebido — Sistema de Jornada de Trabalho',
+            html: `<h2>Cadastro recebido</h2><p>Olá, ${nomeGuerra}. Seu cadastro (matrícula ${matricula}) foi recebido e está aguardando aprovação do Comandante/Escalante da sua UBM. Você será avisado quando puder acessar o sistema.</p>`,
+          });
+        } catch (erroEnvio) {
+          console.error('Erro ao enviar e-mail de confirmação de cadastro:', erroEnvio);
+        }
+
+        await notificarAprovadoresDaUbm(ubmId, nomeCompleto, email, cargo);
+        await signOut(auth);
+      } catch (erro) {
+        throw new Error(mensagemErroAuth(erro));
+      }
+    },
+    [notificarAprovadoresDaUbm],
   );
 
   const enviarResetSenha = useCallback(async (email: string) => {
@@ -833,6 +942,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       logout,
       solicitarAcesso,
       enviarResetSenha,
+      validarMatriculaEfetivo,
+      primeiroAcessoPorMatricula,
       addUbm,
       updateUbm,
       updateUsuario,
@@ -879,6 +990,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       logout,
       solicitarAcesso,
       enviarResetSenha,
+      validarMatriculaEfetivo,
+      primeiroAcessoPorMatricula,
       addUbm,
       updateUbm,
       updateUsuario,

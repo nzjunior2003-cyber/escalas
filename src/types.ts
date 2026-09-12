@@ -25,8 +25,18 @@ export const PAPEIS_RESTRITOS_AO_MASTER: Papel[] = ['master', 'comandante', 'esc
 
 export interface Usuario {
   id: string;
+  /** Nome completo (vem da planilha de efetivo, quando o cadastro é por matrícula). */
   nome: string;
+  /** Nome de guerra — como o militar é chamado no dia a dia. */
+  nomeGuerra?: string;
   email: string;
+  /**
+   * Matrícula (MF) do efetivo, quando o cadastro foi feito pelo fluxo de
+   * primeiro acesso por matrícula. Espelhada em `matriculas/{matricula}`
+   * (coleção pública mínima, só matrícula → email) para permitir login por
+   * matrícula sem expor o restante do perfil a quem não está autenticado.
+   */
+  matricula?: string;
   /** Vazio ('') para o papel 'master', que não pertence a nenhuma UBM específica. */
   ubmId: string;
   papeis: Papel[];

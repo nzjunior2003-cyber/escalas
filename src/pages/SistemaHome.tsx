@@ -55,7 +55,7 @@ function PainelMaster() {
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-        <h2 className="text-base sm:text-lg font-medium text-gray-900 mb-2">Bem-vindo, {usuarioAtual?.nome}</h2>
+        <h2 className="text-base sm:text-lg font-medium text-gray-900 mb-2">Bem-vindo, {usuarioAtual?.nomeGuerra || usuarioAtual?.nome}</h2>
         <p className="text-sm text-gray-500">
           Use <strong>UBMs</strong> para cadastrar unidades e <strong>Usuários</strong> para definir quem é
           Comandante ou Escalante de cada uma.
@@ -99,7 +99,7 @@ export default function SistemaHome() {
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-        <h2 className="text-base sm:text-lg font-medium text-gray-900 mb-2">Bem-vindo, {usuarioAtual?.nome}</h2>
+        <h2 className="text-base sm:text-lg font-medium text-gray-900 mb-2">Bem-vindo, {usuarioAtual?.nomeGuerra || usuarioAtual?.nome}</h2>
         <p className="text-sm text-gray-500">
           Utilize o menu lateral para acessar Escala, Solicitações, Presença e demais módulos disponíveis para o seu perfil.
         </p>

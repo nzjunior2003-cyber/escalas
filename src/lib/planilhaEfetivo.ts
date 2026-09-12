@@ -33,3 +33,30 @@ export async function buscarEfetivoDaPlanilha(): Promise<LinhaMilitar[]> {
     .map((linha) => mapLinhaMilitar(linha))
     .filter((linha): linha is LinhaMilitar => linha !== null);
 }
+
+/**
+ * Chave canônica de uma matrícula (MF): sem espaços nem zeros à esquerda —
+ * usada tanto para casar contra a planilha quanto como id do documento em
+ * `matriculas/{chave}` (login por matrícula), para que "057189387" e
+ * "57189387" sempre resolvam para o mesmo registro.
+ *
+ * Retorna '' para matrícula vazia ou só de zeros ("0000..."), em vez de um
+ * valor-sentinela — a planilha tem linhas com MF em branco (ex.: alunos),
+ * e um sentinela fixo faria "00000000" digitado por engano casar com
+ * qualquer uma delas.
+ */
+export function normalizarMatricula(matricula: string): string {
+  return matricula.trim().replace(/^0+/, '');
+}
+
+/**
+ * Valida uma matrícula (MF) contra a planilha ao vivo — usado no fluxo de
+ * primeiro acesso: só quem está no efetivo do CBMPA consegue completar o
+ * cadastro. Nunca casa contra uma linha com matrícula em branco.
+ */
+export async function buscarMilitarPorMatricula(matricula: string): Promise<LinhaMilitar | null> {
+  const alvo = normalizarMatricula(matricula);
+  if (!alvo) return null;
+  const linhas = await buscarEfetivoDaPlanilha();
+  return linhas.find((l) => l.matricula && normalizarMatricula(l.matricula) === alvo) ?? null;
+}

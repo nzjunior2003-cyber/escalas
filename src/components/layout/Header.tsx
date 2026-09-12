@@ -57,7 +57,7 @@ export default function Header({ sidebarOpen, setSidebarOpen }: HeaderProps) {
 
           <div className="flex items-center border-l border-red-700 pl-4 space-x-3">
             <div className="text-right hidden sm:block">
-              <p className="text-sm font-medium text-white">{usuarioAtual?.nome}</p>
+              <p className="text-sm font-medium text-white">{usuarioAtual?.nomeGuerra || usuarioAtual?.nome}</p>
               <p className="text-xs text-red-200">{usuarioAtual?.papeis?.map((p) => PAPEL_LABELS[p]).join(', ')}</p>
             </div>
             <button onClick={logout} title="Sair do sistema" className="flex items-center text-sm font-medium text-red-200 hover:text-white p-1 rounded-md hover:bg-red-700 transition-colors">
