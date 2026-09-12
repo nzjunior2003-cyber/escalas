@@ -8,30 +8,26 @@ export default function PublicHome() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       <header className="bg-red-800 text-white shadow-md border-b-2 border-amber-400">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-6xl mx-auto flex items-stretch">
+          <div className="bg-white flex items-center px-4 sm:px-6">
             <img src="/logo-cbmpa.png" alt="Brasão do CBMPA" className="w-10 h-10 object-contain" />
-            <div>
-              <p className="font-bold leading-tight">CBMPA</p>
-              <p className="text-xs text-red-200 uppercase tracking-wider">Jornada de Trabalho</p>
-            </div>
           </div>
-          <button
-            onClick={() => setIsLoginModalOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white text-red-800 font-medium rounded-md shadow-sm hover:bg-red-50 transition-colors"
-          >
-            <LogIn className="w-4 h-4" /> Entrar
-          </button>
+          <div className="flex flex-col justify-center px-4 sm:px-6 py-3">
+            <p className="font-bold leading-tight">Sistema de Gerenciamento de Jornada de Trabalho</p>
+            <p className="text-xs text-red-200 uppercase tracking-wider">Corpo de Bombeiros Militar do Pará</p>
+          </div>
         </div>
       </header>
 
-      <main className="flex-1 flex items-center justify-center px-4">
-        <div className="max-w-2xl text-center space-y-6 py-16">
-          <ShieldCheck className="w-16 h-16 text-red-700 mx-auto" />
-          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">
-            Sistema de Gerenciamento de Jornada de Trabalho
-          </h1>
-          <p className="text-gray-600">
+      <main className="flex-1 px-4 py-8">
+        <div className="max-w-3xl mx-auto bg-white rounded-lg border border-gray-200 shadow-sm p-8 text-center space-y-4">
+          <div className="flex items-center justify-center gap-2">
+            <ShieldCheck className="w-7 h-7 text-red-700" />
+            <h1 className="text-2xl font-bold text-gray-900">
+              Sistema de Gerenciamento de Jornada de Trabalho
+            </h1>
+          </div>
+          <p className="text-gray-500">
             Gestão de escalas de serviço das Unidades de Bombeiro Militar (UBM) do Corpo de
             Bombeiros Militar do Pará: escala ordinária, extraordinária e diferenciada,
             afastamentos, permutas/substituições, presença e estatísticas.
