@@ -1,16 +1,30 @@
 /**
  * Núcleo das regras de escala (PRD seção 5).
  *
- * - Escala ordinária: corrida, agrupada por função, rodízio round-robin —
- *   garante o mesmo número de dias de folga para todos dentro da mesma
- *   função e nunca escala dois dias seguidos para o mesmo militar quando há
- *   mais de um militar na função (respeita as 24h mínimas de folga).
+ * O objetivo de fundo, para ordinária e extraordinária: ao final de um ano,
+ * todo militar dentro de uma função deve ter feito aproximadamente a mesma
+ * quantidade de serviços (e, por consequência, a mesma quantidade de
+ * folgas) que os demais da própria função. Isso só se sustenta se a
+ * distribuição olhar para o HISTÓRICO REAL já registrado, e não para um
+ * ponteiro de rodízio reiniciado a cada geração — do contrário, gerar a
+ * escala várias vezes ao longo do ano (semana a semana, ou depois de
+ * incluir/excluir alguém da função) sempre favoreceria quem está primeiro
+ * na lista.
+ *
+ * - Escala ordinária: pra cada dia do período, escolhe entre os militares
+ *   disponíveis (ativos na função, não afastados) quem tem MENOS serviços
+ *   acumulados naquela função até ali — contando tanto o histórico já
+ *   persistido quanto o que a própria geração atual já distribuiu —,
+ *   desempatando por quem serviu há mais tempo (ou nunca serviu). Isso
+ *   equaliza sozinho mesmo com militares entrando/saindo da função ou com
+ *   gerações parciais e repetidas ao longo do ano.
  * - Escala extraordinária: sugestão automática priorizando quem está há
- *   mais tempo sem reforço extraordinário (o "mais folgado"). A alteração
- *   manual pelo escalante NÃO deve corromper o rodízio: a estatística conta
- *   sempre o `militarSugeridoId` original para fins de rodízio, mesmo que
- *   `militarId` (o efetivamente escalado) seja outro — a exceção fica
- *   registrada em separado (militarId !== militarSugeridoId).
+ *   mais tempo sem reforço extraordinário (o "mais folgado") — o mesmo
+ *   princípio de equalização, aplicado um reforço de cada vez. A alteração
+ *   manual pelo escalante NÃO deve corromper essa contagem: a estatística
+ *   conta sempre o `militarSugeridoId` original, mesmo que `militarId` (o
+ *   efetivamente escalado) seja outro — a exceção fica registrada em
+ *   separado (militarId !== militarSugeridoId).
  */
 import { addDays, differenceInCalendarDays, format, parseISO } from 'date-fns';
 import type {
@@ -41,49 +55,73 @@ export function estaAfastado(militarId: string, data: string, afastamentos: Afas
 }
 
 /**
- * Gera a previsão de escala ordinária corrida para uma função, distribuindo
- * os dias em round-robin entre os militares ativos daquela função — cada um
- * assume um dia por vez, na mesma ordem, pulando quem estiver afastado
- * naquele dia. Isso garante contagem de folga igual dentro da função e, com
- * 2+ militares, sempre pelo menos 24h de folga entre serviços de cada um.
+ * Gera a previsão de escala ordinária corrida para uma função: em cada dia
+ * do período, escala quem tem menos serviços acumulados naquela função (ver
+ * nota do módulo) entre os disponíveis — pulando quem estiver afastado —,
+ * desempatando por quem serviu há mais tempo (ou nunca serviu). Precisa do
+ * histórico já persistido (`escalasOrdinariasExistentes`) para contar certo;
+ * sem ele, cada geração recomeçaria do zero e favoreceria sempre os
+ * primeiros da lista.
  */
 export function gerarEscalaOrdinaria(params: {
   ubmId: string;
   funcao: FuncaoOperacional;
   militares: Militar[];
   afastamentos: Afastamento[];
+  escalasOrdinariasExistentes: EscalaOrdinaria[];
   dataInicio: string;
   dataFim: string;
-  /** Ponto de partida do rodízio (índice do próximo militar a ser escalado). */
-  indiceInicial?: number;
 }): Omit<EscalaOrdinaria, 'id' | 'criado_em'>[] {
-  const { ubmId, funcao, afastamentos, dataInicio, dataFim } = params;
+  const { ubmId, funcao, afastamentos, escalasOrdinariasExistentes, dataInicio, dataFim } = params;
   const elegiveis = militaresDaFuncao(params.militares, ubmId, funcao);
   if (elegiveis.length === 0) return [];
 
+  const contagem = new Map<string, number>(elegiveis.map((m) => [m.id, 0]));
+  const ultimoServico = new Map<string, string>();
+  const diasJaEscalados = new Set<string>();
+  for (const e of escalasOrdinariasExistentes) {
+    if (e.ubmId !== ubmId || e.funcao !== funcao) continue;
+    diasJaEscalados.add(e.data);
+    if (!contagem.has(e.militarId)) continue;
+    contagem.set(e.militarId, (contagem.get(e.militarId) ?? 0) + 1);
+    const atual = ultimoServico.get(e.militarId);
+    if (!atual || e.data > atual) ultimoServico.set(e.militarId, e.data);
+  }
+
   const resultado: Omit<EscalaOrdinaria, 'id' | 'criado_em'>[] = [];
-  let indice = params.indiceInicial ?? 0;
   let dataAtual = parseISO(dataInicio);
   const fim = parseISO(dataFim);
-  let tentativasSemEscala = 0;
 
   while (differenceInCalendarDays(fim, dataAtual) >= 0) {
     const dataStr = formatarDataISO(dataAtual);
-    const candidato = elegiveis[indice % elegiveis.length];
-    indice++;
 
-    if (estaAfastado(candidato.id, dataStr, afastamentos)) {
-      // Militar afastado nesse dia: pula para o próximo do rodízio sem
-      // avançar a data, até achar alguém disponível ou esgotar a rodada.
-      tentativasSemEscala++;
-      if (tentativasSemEscala < elegiveis.length) continue;
-      tentativasSemEscala = 0;
+    if (diasJaEscalados.has(dataStr)) {
+      // Esse dia já tem alguém escalado (de uma geração anterior) — não
+      // duplica; quem quiser mudar, edita a escala já gerada.
       dataAtual = addDays(dataAtual, 1);
       continue;
     }
 
-    tentativasSemEscala = 0;
-    resultado.push({ ubmId, funcao, data: dataStr, militarId: candidato.id, origem: 'gerada' });
+    const disponiveis = elegiveis.filter((m) => !estaAfastado(m.id, dataStr, afastamentos));
+
+    if (disponiveis.length === 0) {
+      // Ninguém da função disponível nesse dia (todos afastados) — não dá
+      // pra escalar, segue pro próximo dia sem deixar isso desequilibrar a
+      // contagem de ninguém.
+      dataAtual = addDays(dataAtual, 1);
+      continue;
+    }
+
+    disponiveis.sort((a, b) => {
+      const diferenca = (contagem.get(a.id) ?? 0) - (contagem.get(b.id) ?? 0);
+      if (diferenca !== 0) return diferenca;
+      return (ultimoServico.get(a.id) ?? '').localeCompare(ultimoServico.get(b.id) ?? '');
+    });
+    const escolhido = disponiveis[0];
+
+    resultado.push({ ubmId, funcao, data: dataStr, militarId: escolhido.id, origem: 'gerada' });
+    contagem.set(escolhido.id, (contagem.get(escolhido.id) ?? 0) + 1);
+    ultimoServico.set(escolhido.id, dataStr);
     dataAtual = addDays(dataAtual, 1);
   }
 

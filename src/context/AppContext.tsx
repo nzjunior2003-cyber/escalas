@@ -625,7 +625,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const gerarEPersistirEscalaOrdinaria = useCallback(
     async (params: { ubmId: string; funcao: FuncaoOperacional; dataInicio: string; dataFim: string }) => {
       const db = requireDb();
-      const geradas = gerarEscalaOrdinaria({ ...params, militares, afastamentos });
+      const geradas = gerarEscalaOrdinaria({
+        ...params,
+        militares,
+        afastamentos,
+        escalasOrdinariasExistentes: escalasOrdinarias,
+      });
       const agora = new Date().toISOString();
 
       for (let inicio = 0; inicio < geradas.length; inicio += 400) {
@@ -639,7 +644,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
       return geradas.length;
     },
-    [militares, afastamentos],
+    [militares, afastamentos, escalasOrdinarias],
   );
 
   const updateEscalaOrdinaria = useCallback(async (id: string, militarId: string) => {
