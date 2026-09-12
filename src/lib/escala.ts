@@ -25,6 +25,21 @@
  *   conta sempre o `militarSugeridoId` original, mesmo que `militarId` (o
  *   efetivamente escalado) seja outro — a exceção fica registrada em
  *   separado (militarId !== militarSugeridoId).
+ *
+ * Afastamento e recuperação depois: um militar afastado nunca é escalado
+ * nesse período (`estaAfastado`), mas isso sozinho faria QUALQUER motivo de
+ * afastamento gerar uma "fila de recuperação" quando ele volta — o algoritmo
+ * de equalização, sem mais nada, sempre prioriza quem tem menos serviços, e
+ * quem esteve afastado naturalmente tem menos. Isso só é o comportamento
+ * certo para 'missao_externa': a pessoa continuou trabalhando pelo CBMPA,
+ * só que fora da rotação normal, então faz sentido "compensar" depois.
+ * Férias, licença e dispensa médica são direito/afastamento pessoal — não
+ * geram fila de recuperação, a pessoa serve proporcionalmente menos nesse
+ * período e pronto, sem ficar "devendo" nem sendo priorizada depois disso.
+ * `diasIsentosAteData` credita esses dias como se já tivessem sido servidos
+ * (só pra fins de comparação de equalização), neutralizando essa
+ * recuperação; dias de missão externa não recebem esse crédito, então
+ * continuam gerando prioridade de recuperação normalmente.
  */
 import { addDays, differenceInCalendarDays, format, parseISO } from 'date-fns';
 import type {
@@ -55,6 +70,20 @@ export function estaAfastado(militarId: string, data: string, afastamentos: Afas
 }
 
 /**
+ * Dias de afastamento (até `ateData`, inclusive) que NÃO geram fila de
+ * recuperação — todo motivo exceto 'missao_externa' (ver nota do módulo).
+ */
+export function diasIsentosAteData(militarId: string, ateData: string, afastamentos: Afastamento[]): number {
+  let dias = 0;
+  for (const a of afastamentos) {
+    if (a.militarId !== militarId || a.motivo === 'missao_externa' || a.dataInicio > ateData) continue;
+    const fimEfetivo = a.dataFim < ateData ? a.dataFim : ateData;
+    dias += differenceInCalendarDays(parseISO(fimEfetivo), parseISO(a.dataInicio)) + 1;
+  }
+  return dias;
+}
+
+/**
  * Gera a previsão de escala ordinária corrida para uma função: em cada dia
  * do período, escala quem tem menos serviços acumulados naquela função (ver
  * nota do módulo) entre os disponíveis — pulando quem estiver afastado —,
@@ -76,7 +105,13 @@ export function gerarEscalaOrdinaria(params: {
   const elegiveis = militaresDaFuncao(params.militares, ubmId, funcao);
   if (elegiveis.length === 0) return [];
 
-  const contagem = new Map<string, number>(elegiveis.map((m) => [m.id, 0]));
+  // Crédito inicial: dias de férias/licença/dispensa médica/outro (nunca
+  // missão externa) contam como já "servidos" só pra essa comparação —
+  // sem isso, o próprio algoritmo de equalização trataria a volta de
+  // qualquer afastamento como uma fila de recuperação a cumprir.
+  const contagem = new Map<string, number>(
+    elegiveis.map((m) => [m.id, diasIsentosAteData(m.id, dataFim, afastamentos)]),
+  );
   const ultimoServico = new Map<string, string>();
   const diasJaEscalados = new Set<string>();
   for (const e of escalasOrdinariasExistentes) {
@@ -171,9 +206,20 @@ export function sugerirMilitarExtraordinario(params: {
   }
 
   // Quem nunca foi escalado em extraordinária vem primeiro (data "infinitamente" antiga);
-  // entre os demais, o que está há mais tempo sem reforço extraordinário.
+  // entre os demais, o que está há mais tempo sem reforço extraordinário —
+  // descontando dias de férias/licença/dispensa médica/outro que caíram
+  // depois do último reforço (não geram fila de recuperação: empurram a
+  // "última vez" pra frente, como se tivessem sido servidos naquele meio
+  // tempo). Missão externa não desconta nada — o tempo afastado nessa
+  // continua contando a favor da prioridade de recuperação depois.
   const comOrdenacao = elegiveis
-    .map((m) => ({ militar: m, ultimaData: ultimaVezPorMilitar.get(m.id) ?? '' }))
+    .map((m) => {
+      const ultimaReal = ultimaVezPorMilitar.get(m.id);
+      if (!ultimaReal) return { militar: m, ultimaData: '' };
+      const isentosNoIntervalo = diasIsentosAteData(m.id, data, afastamentos) - diasIsentosAteData(m.id, ultimaReal, afastamentos);
+      const dataAjustada = isentosNoIntervalo > 0 ? formatarDataISO(addDays(parseISO(ultimaReal), isentosNoIntervalo)) : ultimaReal;
+      return { militar: m, ultimaData: dataAjustada };
+    })
     .sort((a, b) => a.ultimaData.localeCompare(b.ultimaData));
 
   return comOrdenacao[0]?.militar ?? null;
