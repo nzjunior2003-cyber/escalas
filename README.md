@@ -21,6 +21,26 @@ npm run dev
 Sem o `.env` preenchido o app abre normalmente (tela pública e modal de
 login), mas autenticação e persistência ficam desligadas.
 
+### Testando sem um projeto Firebase real (Local Emulator Suite)
+
+```bash
+npx firebase-tools emulators:start --only auth,firestore --project demo-qualquer-nome
+```
+
+No `.env`, aponte para o emulador (as demais variáveis `VITE_FIREBASE_*`
+podem ser fictícias, só precisam estar preenchidas):
+
+```
+VITE_USE_FIREBASE_EMULATOR=true
+```
+
+O emulador de Firestore já aplica o `firestore.rules` do projeto de verdade
+— dá pra validar o RBAC (master/comandante/escalante) de ponta a ponta sem
+tocar em dados reais. O primeiro usuário master (ver bootstrap abaixo)
+precisa ser criado direto no emulador (Admin SDK, ou pela mesma ideia do
+Firebase Console) — a interface web do emulador não vem habilitada por
+padrão neste repositório (`firebase.json` → `emulators.ui.enabled: false`).
+
 ## Decisões de modelagem já alinhadas
 
 - Um militar pode acumular mais de uma função (`Militar.funcoes: FuncaoOperacional[]`).
@@ -52,6 +72,26 @@ Console/Firestore (coleção `usuarios`, id = UID do Firebase Auth):
 A partir daí, esse master cadastra as UBMs e define quem é Comandante/
 Escalante de cada uma pelo próprio app — é um bootstrap único para todo o
 CBMPA, não um por UBM.
+
+Esse fluxo completo (bootstrap do master → cadastro de UBM → cadastro de
+Comandante → autocadastro de um militar → aprovação pelo Comandante, mais
+uma tentativa de autopromoção a Escalante por fora da UI) foi testado de
+ponta a ponta contra o Local Emulator Suite, com `firestore.rules` real. Dois
+bugs genuínos apareceram só nesse teste (a UI nunca teria exposto nenhum
+dos dois) e já estão corrigidos:
+- A leitura de `alertas` (`AppContext`) buscava a coleção inteira e
+  filtrava no cliente — as regras exigem um `where(usuarioId == ...)` na
+  própria query para autorizar a leitura; sem isso, o Firestore recusa a
+  leitura inteira.
+- `setDoc`/`updateDoc` de `usuarios` podiam receber `militarId: undefined`
+  explícito (ao desvincular o efetivo) — o Firestore rejeita `undefined`
+  como valor de campo. `AppContext` agora sanitiza isso antes de escrever
+  (`semIndefinidosParaCriar`/`semIndefinidosParaAtualizar`).
+- A tela pública "Solicitar Acesso" nunca conseguia listar UBMs no
+  dropdown: a coleção `ubms` só era buscada quando autenticado, e um
+  visitante nunca está. `ubms` agora é lida sempre (`firestore.rules`
+  também passou a permitir leitura pública dessa coleção — sigla/nome de
+  UBM não são dados sensíveis).
 
 ## O que está implementado neste scaffold
 

@@ -86,9 +86,12 @@ service cloud.firestore {
     }
 
     // UBMs são cadastradas pelo master — Comandante/Escalante não criam
-    // nem removem UBMs, só operam dentro da que já pertencem.
+    // nem removem UBMs, só operam dentro da que já pertencem. Leitura
+    // pública (sem exigir autenticação): a tela de "Solicitar Acesso"
+    // precisa listar as UBMs para quem ainda nem tem conta; sigla/nome não
+    // são dados sensíveis.
     match /ubms/{documento} {
-      allow read: if ativo();
+      allow read: if true;
       allow write: if master();
     }
     match /militares/{documento} {

@@ -19,6 +19,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -121,18 +122,50 @@ interface AppContextData {
 
 const AppContext = createContext<AppContextData>({} as AppContextData);
 
-function useColecao<T extends { id: string }>(nome: string, ativo: boolean): T[] {
+/**
+ * O Firestore rejeita `undefined` como valor de campo (`setDoc`/`addDoc`
+ * lançam "Unsupported field value: undefined"). Campos opcionais do domínio
+ * (ex.: `militarId` quando o usuário desvincula o efetivo) chegam aqui como
+ * `undefined` — para `create`, basta omitir a chave; para `update`, é
+ * preciso `deleteField()` para de fato remover o campo do documento
+ * existente, e não deixar o valor antigo intacto.
+ */
+function semIndefinidosParaCriar<T extends object>(dados: T): Partial<T> {
+  return Object.fromEntries(Object.entries(dados).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
+function semIndefinidosParaAtualizar<T extends object>(dados: T): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(dados).map(([k, v]) => [k, v === undefined ? deleteField() : v]));
+}
+
+/**
+ * `filtro` aplica um `where(campo, '==', valor)` na query — necessário
+ * sempre que as firestore.rules da coleção exigem uma condição de leitura
+ * baseada em documento (ex.: `usuarioId == request.auth.uid`): sem o filtro
+ * correspondente na própria query, o Firestore recusa a leitura da coleção
+ * inteira por não conseguir provar a regra para todo documento possível.
+ */
+function useColecao<T extends { id: string }>(
+  nome: string,
+  ativo: boolean,
+  filtro?: { campo: string; valor: string },
+): T[] {
   const [dados, setDados] = useState<T[]>([]);
+  const filtroCampo = filtro?.campo;
+  const filtroValor = filtro?.valor;
 
   useEffect(() => {
     const db = getDb();
-    if (!ativo || !db) {
+    if (!ativo || !db || (filtroCampo && !filtroValor)) {
       setDados([]);
       return;
     }
 
+    const referencia =
+      filtroCampo && filtroValor ? query(collection(db, nome), where(filtroCampo, '==', filtroValor)) : collection(db, nome);
+
     const cancelar = onSnapshot(
-      collection(db, nome),
+      referencia,
       (snapshot) => {
         setDados(
           snapshot.docs.map((documento) => ({
@@ -147,7 +180,7 @@ function useColecao<T extends { id: string }>(nome: string, ativo: boolean): T[]
     );
 
     return () => cancelar();
-  }, [nome, ativo]);
+  }, [nome, ativo, filtroCampo, filtroValor]);
 
   return dados;
 }
@@ -199,7 +232,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const usuarioAtual = perfil && perfil.ativo ? perfil : null;
   const isAuthenticated = !!usuarioAtual;
 
-  const ubms = useColecao<Ubm>('ubms', isAuthenticated);
+  // Lida mesmo sem login: a tela de "Solicitar Acesso" precisa listar as
+  // UBMs para quem ainda não tem conta (ver firestore.rules).
+  const ubms = useColecao<Ubm>('ubms', isFirebaseConfigured);
   const usuarios = useColecao<Usuario>('usuarios', isAuthenticated);
   const militares = useColecao<Militar>('militares', isAuthenticated);
   const escalasOrdinarias = useColecao<EscalaOrdinaria>('escalas_ordinarias', isAuthenticated);
@@ -212,11 +247,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const afastamentos = useColecao<Afastamento>('afastamentos', isAuthenticated);
   const presencas = useColecao<RegistroPresenca>('presencas', isAuthenticated);
   const solicitacoesServico = useColecao<SolicitacaoServico>('solicitacoes_servico', isAuthenticated);
-  const alertasTodos = useColecao<Alerta>('alertas', isAuthenticated);
-  const alertas = useMemo(
-    () => alertasTodos.filter((a) => a.usuarioId === usuarioAtual?.id),
-    [alertasTodos, usuarioAtual],
-  );
+  const alertas = useColecao<Alerta>('alertas', isAuthenticated, {
+    campo: 'usuarioId',
+    valor: usuarioAtual?.id ?? '',
+  });
 
   // --- Autenticação ---------------------------------------------------------
   const registrarLogAcesso = useCallback(async (userId: string | null, email: string, sucesso: boolean) => {
@@ -365,7 +399,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const campos: Record<string, unknown> = { ...dados };
     delete campos.id;
     delete (campos as { senha?: unknown }).senha;
-    await updateDoc(doc(db, 'usuarios', id), campos);
+    await updateDoc(doc(db, 'usuarios', id), semIndefinidosParaAtualizar(campos));
   }, []);
 
   /**
@@ -379,7 +413,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         const db = requireDb();
         const { senha, ...perfilNovo } = dados;
         const uid = await criarContaAuthIsolada(perfilNovo.email, senha);
-        await setDoc(doc(db, 'usuarios', uid), { ...perfilNovo, criado_em: new Date().toISOString() });
+        await setDoc(doc(db, 'usuarios', uid), semIndefinidosParaCriar({ ...perfilNovo, criado_em: new Date().toISOString() }));
       } catch (erro) {
         throw new Error(mensagemErroAuth(erro));
       }
