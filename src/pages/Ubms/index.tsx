@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import type { FormEvent } from 'react';
-import { Building2, Plus, Edit2, X } from 'lucide-react';
+import { useRef, useState } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
+import { Building2, Plus, Edit2, X, Upload } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { redimensionarImagemParaDataUrl } from '../../lib/imagem';
 import { temPapel, type Ubm } from '../../types';
 
 /** Cadastro de UBMs — exclusivo do master (seção "Papéis" do sistema). */
@@ -10,9 +11,11 @@ export default function Ubms() {
 
   const [isNovoOpen, setIsNovoOpen] = useState(false);
   const [editando, setEditando] = useState<Ubm | null>(null);
-  const [form, setForm] = useState({ nome: '', sigla: '' });
+  const [form, setForm] = useState<{ nome: string; sigla: string; logoDataUrl?: string }>({ nome: '', sigla: '' });
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const inputNovoRef = useRef<HTMLInputElement>(null);
+  const inputEditarRef = useRef<HTMLInputElement>(null);
 
   if (!temPapel(usuarioAtual, 'master')) {
     return <div className="p-8 text-center text-gray-500">Você não tem permissão para acessar este módulo.</div>;
@@ -20,13 +23,29 @@ export default function Ubms() {
 
   const contarUsuarios = (ubmId: string) => usuarios.filter((u) => u.ubmId === ubmId).length;
 
+  const handleSelecionarLogo = async (e: ChangeEvent<HTMLInputElement>, destino: 'novo' | 'editar') => {
+    const arquivo = e.target.files?.[0];
+    e.target.value = '';
+    if (!arquivo) return;
+    const dataUrl = await redimensionarImagemParaDataUrl(arquivo, 200);
+    if (!dataUrl) {
+      setErro('Não foi possível ler essa imagem.');
+      return;
+    }
+    if (destino === 'novo') {
+      setForm({ ...form, logoDataUrl: dataUrl });
+    } else if (editando) {
+      setEditando({ ...editando, logoDataUrl: dataUrl });
+    }
+  };
+
   const handleCriar = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.nome || !form.sigla) return;
     setSalvando(true);
     setErro(null);
     try {
-      await addUbm({ nome: form.nome, sigla: form.sigla });
+      await addUbm({ nome: form.nome, sigla: form.sigla, logoDataUrl: form.logoDataUrl });
       setForm({ nome: '', sigla: '' });
       setIsNovoOpen(false);
     } catch (erroCriar) {
@@ -42,7 +61,7 @@ export default function Ubms() {
     setSalvando(true);
     setErro(null);
     try {
-      await updateUbm(editando.id, { nome: editando.nome, sigla: editando.sigla });
+      await updateUbm(editando.id, { nome: editando.nome, sigla: editando.sigla, logoDataUrl: editando.logoDataUrl });
       setEditando(null);
     } catch (erroEditar) {
       setErro(erroEditar instanceof Error ? erroEditar.message : 'Não foi possível salvar as alterações.');
@@ -88,8 +107,12 @@ export default function Ubms() {
               ubms.map((u) => (
                 <tr key={u.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      <Building2 className="w-4 h-4 text-gray-400" />
+                    <div className="flex items-center gap-3">
+                      {u.logoDataUrl ? (
+                        <img src={u.logoDataUrl} alt="" className="w-8 h-8 object-contain" />
+                      ) : (
+                        <Building2 className="w-6 h-6 text-gray-400" />
+                      )}
                       <div>
                         <div className="text-sm font-medium text-gray-900">{u.sigla}</div>
                         <div className="text-sm text-gray-500">{u.nome}</div>
@@ -119,6 +142,22 @@ export default function Ubms() {
             {erro && <p className="text-sm text-red-600 mb-3">{erro}</p>}
             <form onSubmit={handleCriar} className="space-y-4">
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Brasão da UBM (opcional)</label>
+                <div className="flex items-center gap-3">
+                  {form.logoDataUrl ? (
+                    <img src={form.logoDataUrl} alt="" className="w-12 h-12 object-contain border border-gray-200 rounded" />
+                  ) : (
+                    <div className="w-12 h-12 flex items-center justify-center border border-dashed border-gray-300 rounded text-gray-300">
+                      <Building2 className="w-6 h-6" />
+                    </div>
+                  )}
+                  <input ref={inputNovoRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleSelecionarLogo(e, 'novo')} />
+                  <button type="button" onClick={() => inputNovoRef.current?.click()} className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50">
+                    <Upload className="-ml-0.5 mr-1.5 h-3.5 w-3.5" /> Escolher imagem
+                  </button>
+                </div>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Sigla</label>
                 <input required value={form.sigla} onChange={(e) => setForm({ ...form, sigla: e.target.value })} placeholder="Ex: 1º GB" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
               </div>
@@ -146,6 +185,22 @@ export default function Ubms() {
             <h3 className="text-lg font-medium text-gray-900 mb-4">Editar UBM</h3>
             {erro && <p className="text-sm text-red-600 mb-3">{erro}</p>}
             <form onSubmit={handleSalvarEdicao} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Brasão da UBM (opcional)</label>
+                <div className="flex items-center gap-3">
+                  {editando.logoDataUrl ? (
+                    <img src={editando.logoDataUrl} alt="" className="w-12 h-12 object-contain border border-gray-200 rounded" />
+                  ) : (
+                    <div className="w-12 h-12 flex items-center justify-center border border-dashed border-gray-300 rounded text-gray-300">
+                      <Building2 className="w-6 h-6" />
+                    </div>
+                  )}
+                  <input ref={inputEditarRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleSelecionarLogo(e, 'editar')} />
+                  <button type="button" onClick={() => inputEditarRef.current?.click()} className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50">
+                    <Upload className="-ml-0.5 mr-1.5 h-3.5 w-3.5" /> Trocar imagem
+                  </button>
+                </div>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Sigla</label>
                 <input required value={editando.sigla} onChange={(e) => setEditando({ ...editando, sigla: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />

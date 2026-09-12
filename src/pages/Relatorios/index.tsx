@@ -44,6 +44,7 @@ export default function Relatorios() {
         tipo,
         funcao,
         ubmNome: ubm ? `${ubm.sigla} - ${ubm.nome}` : 'Unidade de Bombeiro Militar',
+        ubmLogoDataUrl: ubm?.logoDataUrl,
         semanaInicio: semana,
         linhas,
       });

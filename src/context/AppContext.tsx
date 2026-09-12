@@ -384,13 +384,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // --- UBMs -------------------------------------------------------------
   const addUbm = useCallback(async (dados: Omit<Ubm, 'id'>) => {
     const db = requireDb();
-    const ref = await addDoc(collection(db, 'ubms'), dados);
+    const ref = await addDoc(collection(db, 'ubms'), semIndefinidosParaCriar(dados));
     return ref.id;
   }, []);
 
   const updateUbm = useCallback(async (id: string, dados: Partial<Ubm>) => {
     const db = requireDb();
-    await updateDoc(doc(db, 'ubms', id), dados);
+    await updateDoc(doc(db, 'ubms', id), semIndefinidosParaAtualizar(dados));
   }, []);
 
   // --- Usuários (aprovação de cadastro, perfis) -----------------------------

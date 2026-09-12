@@ -48,6 +48,8 @@ export interface Ubm {
   id: string;
   nome: string;
   sigla: string;
+  /** Brasão da UBM (data URL, já redimensionado) — mostrado no painel da unidade após o login. */
+  logoDataUrl?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -22,6 +22,19 @@ function KpiCard({ titulo, valor, icone: Icone, cor }: KpiCardProps) {
   );
 }
 
+/** Cabeçalho com o brasão da UBM logada, mesmo título do sistema e o nome da UBM como subtítulo. */
+function CabecalhoBrasao({ logoSrc, subtitulo }: { logoSrc: string; subtitulo: string }) {
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 flex flex-col sm:flex-row items-center sm:items-start gap-4 text-center sm:text-left">
+      <img src={logoSrc} alt="Brasão" className="w-16 h-16 sm:w-20 sm:h-20 object-contain flex-shrink-0" />
+      <div>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Sistema de Gerenciamento de Jornada de Trabalho</h1>
+        <p className="mt-1 text-sm sm:text-base font-medium text-gray-600">{subtitulo}</p>
+      </div>
+    </div>
+  );
+}
+
 /** Painel do master: não pertence a nenhuma UBM, então mostra uma visão geral do CBMPA em vez de KPIs operacionais de uma unidade. */
 function PainelMaster() {
   const { usuarioAtual, ubms, usuarios } = useApp();
@@ -32,10 +45,7 @@ function PainelMaster() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Painel do Master</h1>
-        <p className="mt-1 text-sm text-gray-500">Visão geral do CBMPA — UBMs cadastradas e papéis atribuídos.</p>
-      </div>
+      <CabecalhoBrasao logoSrc="/logo-cbmpa.png" subtitulo="Administração — CBMPA" />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard titulo="UBMs cadastradas" valor={ubms.length} icone={Building2} cor="border-l-blue-500" />
@@ -56,13 +66,14 @@ function PainelMaster() {
 }
 
 export default function SistemaHome() {
-  const { usuarioAtual, militares, escalasOrdinarias, escalasExtraordinarias, solicitacoesServico, afastamentos } = useApp();
+  const { usuarioAtual, ubms, militares, escalasOrdinarias, escalasExtraordinarias, solicitacoesServico, afastamentos } = useApp();
 
   if (temPapel(usuarioAtual, 'master')) {
     return <PainelMaster />;
   }
 
   const ubmId = usuarioAtual?.ubmId;
+  const ubm = ubms.find((u) => u.id === ubmId);
   const hoje = formatarDataISO(new Date());
 
   const militaresDaUbm = militares.filter((m) => m.ubmId === ubmId && m.ativo);
@@ -78,10 +89,7 @@ export default function SistemaHome() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Painel da Unidade</h1>
-        <p className="mt-1 text-sm text-gray-500">Visão geral da escala e da situação operacional de hoje.</p>
-      </div>
+      <CabecalhoBrasao logoSrc={ubm?.logoDataUrl || '/logo-cbmpa.png'} subtitulo={ubm?.nome ?? 'Unidade de Bombeiro Militar'} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard titulo="Efetivo ativo" valor={militaresDaUbm.length} icone={Users} cor="border-l-blue-500" />

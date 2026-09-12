@@ -8,6 +8,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { carregarImagemPublicaComoDataUrl } from './imagem';
 import { FUNCAO_LABELS, type FuncaoOperacional } from '../types';
 
 export interface LinhaRelatorioEscala {
@@ -20,40 +21,11 @@ export interface DadosRelatorioEscala {
   tipo: 'ordinaria' | 'extraordinaria';
   funcao: FuncaoOperacional;
   ubmNome: string;
+  /** Brasão da UBM, já como data URL — quando ausente, usa o brasão institucional do CBMPA. */
+  ubmLogoDataUrl?: string;
   /** Segunda-feira da semana do relatório (yyyy-MM-dd). */
   semanaInicio: string;
   linhas: LinhaRelatorioEscala[];
-}
-
-/**
- * Carrega uma imagem pública (ex.: `/logo-cbmpa.png`) e a redesenha, reduzida,
- * num canvas — a logo institucional é um arquivo de alta resolução (vários
- * MB); embutida crua no PDF, cada relatório baixado ficaria com dezenas de
- * MB. Recodificada em ~`tamanhoMax`px o resultado cai para poucos KB sem
- * perda visual perceptível no tamanho em que a logo aparece no documento.
- */
-async function carregarImagemComoDataUrl(url: string, tamanhoMax = 160): Promise<string | null> {
-  try {
-    const resposta = await fetch(url);
-    if (!resposta.ok) return null;
-    const blob = await resposta.blob();
-    const bitmap = await createImageBitmap(blob);
-
-    const escala = Math.min(1, tamanhoMax / Math.max(bitmap.width, bitmap.height));
-    const largura = Math.round(bitmap.width * escala);
-    const altura = Math.round(bitmap.height * escala);
-
-    const canvas = document.createElement('canvas');
-    canvas.width = largura;
-    canvas.height = altura;
-    const contexto = canvas.getContext('2d');
-    if (!contexto) return null;
-    contexto.drawImage(bitmap, 0, 0, largura, altura);
-
-    return canvas.toDataURL('image/png');
-  } catch {
-    return null;
-  }
 }
 
 function nomeArquivo(dados: DadosRelatorioEscala): string {
@@ -66,7 +38,7 @@ export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void>
   const centroX = larguraPagina / 2;
   let y = 48;
 
-  const logoDataUrl = await carregarImagemComoDataUrl('/logo-cbmpa.png');
+  const logoDataUrl = dados.ubmLogoDataUrl ?? (await carregarImagemPublicaComoDataUrl('/logo-cbmpa.png'));
   if (logoDataUrl) {
     const tamanhoLogo = 48;
     doc.addImage(logoDataUrl, 'PNG', centroX - tamanhoLogo / 2, y, tamanhoLogo, tamanhoLogo);
