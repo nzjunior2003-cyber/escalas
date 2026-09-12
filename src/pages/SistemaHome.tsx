@@ -68,7 +68,11 @@ function PainelMaster() {
 export default function SistemaHome() {
   const { usuarioAtual, ubms, militares, escalasOrdinarias, escalasExtraordinarias, solicitacoesServico, afastamentos } = useApp();
 
-  if (temPapel(usuarioAtual, 'master')) {
+  // Master "puro" (sem UBM) vê o painel geral do CBMPA; se ele também
+  // acumula comandante/escalante numa UBM, o painel operacional daquela
+  // UBM (abaixo) volta a fazer mais sentido — daí olhar o vínculo com a
+  // UBM, não o papel isoladamente.
+  if (!usuarioAtual?.ubmId) {
     return <PainelMaster />;
   }
 

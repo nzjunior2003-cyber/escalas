@@ -29,14 +29,19 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
   const isComandante = temPapel(usuarioAtual, 'comandante');
   const isEscalante = temPapel(usuarioAtual, 'escalante');
   const isGestao = isComandante || isEscalante;
+  // Um master "puro" (sem UBM) não opera escala/solicitações/presença de
+  // ninguém; mas se ele também acumula comandante/escalante numa UBM
+  // (papéis podem coexistir na mesma pessoa), esses módulos voltam a fazer
+  // sentido pra ele nessa UBM — daí checar o vínculo com a UBM, não o papel.
+  const temUbm = !!usuarioAtual?.ubmId;
 
   const navigation = [
     { name: 'Início', href: '/sistema', icon: Home, show: true },
     { name: 'Efetivo', href: '/sistema/efetivo', icon: Users, show: isGestao },
-    { name: 'Escala', href: '/sistema/escala', icon: CalendarDays, show: !isMaster },
-    { name: 'Solicitações', href: '/sistema/solicitacoes', icon: Send, show: !isMaster },
+    { name: 'Escala', href: '/sistema/escala', icon: CalendarDays, show: temUbm },
+    { name: 'Solicitações', href: '/sistema/solicitacoes', icon: Send, show: temUbm },
     { name: 'Afastamentos', href: '/sistema/afastamentos', icon: UserX, show: isGestao },
-    { name: 'Presença', href: '/sistema/presenca', icon: ClipboardCheck, show: !isMaster },
+    { name: 'Presença', href: '/sistema/presenca', icon: ClipboardCheck, show: temUbm },
     { name: 'Relatórios', href: '/sistema/relatorios', icon: FileBarChart, show: isGestao },
     { name: 'Estatísticas', href: '/sistema/estatisticas', icon: PieChart, show: isGestao },
     { name: 'Usuários', href: '/sistema/usuarios', icon: ShieldCheck, show: isGestao || isMaster },
