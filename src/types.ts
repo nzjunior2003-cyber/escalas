@@ -164,6 +164,7 @@ export type MotivoAfastamento =
   | 'ferias'
   | 'licenca'
   | 'dispensa_medica'
+  | 'atestado_medico'
   | 'missao_externa'
   | 'outro';
 
@@ -171,9 +172,19 @@ export const MOTIVO_AFASTAMENTO_LABELS: Record<MotivoAfastamento, string> = {
   ferias: 'Férias',
   licenca: 'Licença',
   dispensa_medica: 'Dispensa médica',
+  atestado_medico: 'Atestado médico',
   missao_externa: 'Missão externa',
   outro: 'Outro',
 };
+
+/**
+ * Motivos de afastamento que geram fila de recuperação (ver nota em
+ * `src/lib/escala.ts`): a pessoa segue "devendo" o serviço e é priorizada
+ * ao voltar. Dispensa médica é autorizada pela junta médica e NÃO entra
+ * aqui — só o atestado médico comum (avaliação isolada, sem passar pela
+ * junta) e a missão externa geram essa fila.
+ */
+export const MOTIVOS_COM_FILA_DE_RECUPERACAO: MotivoAfastamento[] = ['atestado_medico', 'missao_externa'];
 
 export interface Afastamento {
   id: string;

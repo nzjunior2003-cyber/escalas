@@ -31,23 +31,26 @@
  * afastamento gerar uma "fila de recuperação" quando ele volta — o algoritmo
  * de equalização, sem mais nada, sempre prioriza quem tem menos serviços, e
  * quem esteve afastado naturalmente tem menos. Isso só é o comportamento
- * certo para 'missao_externa': a pessoa continuou trabalhando pelo CBMPA,
- * só que fora da rotação normal, então faz sentido "compensar" depois.
- * Férias, licença e dispensa médica são direito/afastamento pessoal — não
- * geram fila de recuperação, a pessoa serve proporcionalmente menos nesse
- * período e pronto, sem ficar "devendo" nem sendo priorizada depois disso.
- * `diasIsentosAteData` credita esses dias como se já tivessem sido servidos
- * (só pra fins de comparação de equalização), neutralizando essa
- * recuperação; dias de missão externa não recebem esse crédito, então
- * continuam gerando prioridade de recuperação normalmente.
+ * certo pros motivos em `MOTIVOS_COM_FILA_DE_RECUPERACAO` (missão externa e
+ * atestado médico avulso): a pessoa continuou "devendo" o serviço — na
+ * missão, porque seguiu trabalhando pelo CBMPA fora da rotação normal; no
+ * atestado, porque é uma dispensa pontual sem passar pela junta médica.
+ * Férias, licença e dispensa médica (essa sim autorizada pela junta) são
+ * afastamento reconhecido — não geram fila de recuperação, a pessoa serve
+ * proporcionalmente menos nesse período e pronto, sem ficar "devendo" nem
+ * sendo priorizada depois disso. `diasIsentosAteData` credita esses dias
+ * como se já tivessem sido servidos (só pra fins de comparação de
+ * equalização), neutralizando a recuperação; os motivos com fila não
+ * recebem esse crédito, então continuam gerando prioridade normalmente.
  */
 import { addDays, differenceInCalendarDays, format, parseISO } from 'date-fns';
-import type {
-  Afastamento,
-  EscalaExtraordinaria,
-  EscalaOrdinaria,
-  FuncaoOperacional,
-  Militar,
+import {
+  MOTIVOS_COM_FILA_DE_RECUPERACAO,
+  type Afastamento,
+  type EscalaExtraordinaria,
+  type EscalaOrdinaria,
+  type FuncaoOperacional,
+  type Militar,
 } from '../types';
 
 export const FORMATO_DATA = 'yyyy-MM-dd';
@@ -71,12 +74,13 @@ export function estaAfastado(militarId: string, data: string, afastamentos: Afas
 
 /**
  * Dias de afastamento (até `ateData`, inclusive) que NÃO geram fila de
- * recuperação — todo motivo exceto 'missao_externa' (ver nota do módulo).
+ * recuperação — todo motivo fora de `MOTIVOS_COM_FILA_DE_RECUPERACAO`
+ * (ver nota do módulo).
  */
 export function diasIsentosAteData(militarId: string, ateData: string, afastamentos: Afastamento[]): number {
   let dias = 0;
   for (const a of afastamentos) {
-    if (a.militarId !== militarId || a.motivo === 'missao_externa' || a.dataInicio > ateData) continue;
+    if (a.militarId !== militarId || MOTIVOS_COM_FILA_DE_RECUPERACAO.includes(a.motivo) || a.dataInicio > ateData) continue;
     const fimEfetivo = a.dataFim < ateData ? a.dataFim : ateData;
     dias += differenceInCalendarDays(parseISO(fimEfetivo), parseISO(a.dataInicio)) + 1;
   }
