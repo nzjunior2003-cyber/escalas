@@ -9,7 +9,6 @@ import {
   STATUS_SOLICITACAO_LABELS,
   SolicitacaoServico,
   TipoEscalaServico,
-  TipoSolicitacaoServico,
   temPapel,
 } from '../../types';
 
@@ -43,7 +42,6 @@ export default function Solicitacoes() {
   const outrosMilitares = usuarios.filter((u) => u.ubmId === ubmId && u.militarId && u.militarId !== meuMilitarId);
 
   const [form, setForm] = useState({
-    tipo: 'substituicao' as TipoSolicitacaoServico,
     modalidade: 'integral' as ModalidadeSolicitacaoServico,
     horarioParcial: '',
     localEvento: '',
@@ -62,7 +60,6 @@ export default function Solicitacoes() {
     try {
       await criarSolicitacaoServico({
         ubmId,
-        tipo: form.tipo,
         modalidade: form.modalidade,
         horarioParcial: form.modalidade === 'parcial' ? form.horarioParcial : undefined,
         localEvento: form.localEvento || undefined,
@@ -71,7 +68,7 @@ export default function Solicitacoes() {
         indicadoId: form.indicadoId,
         motivo: form.motivo,
       });
-      setForm({ tipo: 'substituicao', modalidade: 'integral', horarioParcial: '', localEvento: '', escalaOrigemId: '', tipoEscalaOrigem: 'ordinaria', indicadoId: '', motivo: '' });
+      setForm({ modalidade: 'integral', horarioParcial: '', localEvento: '', escalaOrigemId: '', tipoEscalaOrigem: 'ordinaria', indicadoId: '', motivo: '' });
     } finally {
       setEnviando(false);
     }
@@ -130,23 +127,17 @@ export default function Solicitacoes() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Solicitações</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Autorização de Serviço (substituição) e Permuta — o indicado precisa aceitar primeiro, depois vai para
-          aprovação do Comandante ou do Escalante. Só depois de aprovada o PDF de autorização é liberado; a escala do
-          sistema não muda automaticamente, só por edição manual do escalante.
+          Autorização de Substituição de Serviço — via de mão única: o indicado cobre o serviço do solicitante, sem
+          nenhuma obrigação de troca. O indicado precisa aceitar primeiro, depois vai para aprovação do Comandante ou
+          do Escalante. Só depois de aprovada o PDF de autorização é liberado; a escala do sistema não muda
+          automaticamente, só por edição manual do escalante.
         </p>
       </div>
 
       {meuMilitarId && (
         <form onSubmit={handleEnviar} className="bg-white p-4 rounded-lg border border-gray-200 space-y-4">
-          <h2 className="text-sm font-semibold text-gray-700">Nova solicitação</h2>
+          <h2 className="text-sm font-semibold text-gray-700">Nova autorização de substituição</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Tipo</label>
-              <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value as TipoSolicitacaoServico })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3">
-                <option value="substituicao">Autorização de serviço (substituição)</option>
-                <option value="permuta">Permuta</option>
-              </select>
-            </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Modalidade</label>
               <select value={form.modalidade} onChange={(e) => setForm({ ...form, modalidade: e.target.value as ModalidadeSolicitacaoServico })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3">
@@ -167,7 +158,7 @@ export default function Solicitacoes() {
               </div>
             )}
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Minha escala a ser trocada</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Minha escala a ser coberta</label>
               <select
                 value={form.escalaOrigemId}
                 onChange={(e) => {
@@ -213,7 +204,7 @@ export default function Solicitacoes() {
             <div key={s.id} className="flex items-center justify-between bg-white rounded-md p-3 border border-amber-100">
               <div className="text-sm">
                 <p className="font-medium text-gray-900">
-                  {nomeUsuario(s.solicitanteId)} pediu {s.tipo === 'permuta' ? 'permuta' : 'substituição'} — {MODALIDADE_SOLICITACAO_LABELS[s.modalidade]}
+                  {nomeUsuario(s.solicitanteId)} pediu autorização de substituição — {MODALIDADE_SOLICITACAO_LABELS[s.modalidade]}
                 </p>
                 {s.motivo && <p className="text-gray-500">Motivo: {s.motivo}</p>}
               </div>
@@ -232,7 +223,7 @@ export default function Solicitacoes() {
           {solicitacoesParaAprovador.map((s) => (
             <div key={s.id} className="flex items-center justify-between bg-white rounded-md p-3 border border-blue-100">
               <div className="text-sm">
-                <p className="font-medium text-gray-900">{nomeUsuario(s.solicitanteId)} ↔ {nomeUsuario(s.indicadoId)} ({s.tipo}, {MODALIDADE_SOLICITACAO_LABELS[s.modalidade]})</p>
+                <p className="font-medium text-gray-900">{nomeUsuario(s.solicitanteId)} → {nomeUsuario(s.indicadoId)} ({MODALIDADE_SOLICITACAO_LABELS[s.modalidade]})</p>
                 {s.motivo && <p className="text-gray-500">Motivo: {s.motivo}</p>}
               </div>
               <div className="flex gap-2">
@@ -248,8 +239,8 @@ export default function Solicitacoes() {
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Tipo</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Indicado</th>
+              <th className="px-4 py-2 text-left font-medium text-gray-500">Modalidade</th>
+              <th className="px-4 py-2 text-left font-medium text-gray-500">Substituto indicado</th>
               <th className="px-4 py-2 text-left font-medium text-gray-500">Status</th>
               <th className="relative px-4 py-2"></th>
             </tr>
@@ -257,7 +248,7 @@ export default function Solicitacoes() {
           <tbody className="divide-y divide-gray-100">
             {minhasSolicitacoesFeitas.map((s) => (
               <tr key={s.id}>
-                <td className="px-4 py-2 capitalize">{s.tipo}</td>
+                <td className="px-4 py-2">{MODALIDADE_SOLICITACAO_LABELS[s.modalidade]}</td>
                 <td className="px-4 py-2">{nomeUsuario(s.indicadoId)}</td>
                 <td className="px-4 py-2">{STATUS_SOLICITACAO_LABELS[s.status]}</td>
                 <td className="px-4 py-2 text-right">

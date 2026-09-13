@@ -1,9 +1,9 @@
 /**
- * Geração do PDF "Autorização de Serviço Extraordinário" — documento que
- * autoriza dois militares a trocar (permutar) o serviço entre si num evento
- * extraordinário específico. O documento sai com os campos de assinatura em
- * branco: a assinatura em si acontece fora do sistema (gov.br/token), e o
- * PDF assinado é o que fica arquivado como comprovante.
+ * Geração do PDF "Autorização de Serviço Extraordinário/Ordinário" —
+ * documento que autoriza um militar substituto a cobrir o serviço de outro
+ * (via de mão única, sem obrigação de troca). O documento sai com os campos
+ * de assinatura em branco: a assinatura em si acontece fora do sistema
+ * (gov.br/token), e o PDF assinado é o que fica arquivado como comprovante.
  */
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';

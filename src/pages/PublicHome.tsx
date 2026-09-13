@@ -30,7 +30,7 @@ export default function PublicHome() {
           <p className="text-gray-500">
             Gestão de escalas de serviço das Unidades de Bombeiro Militar (UBM) do Corpo de
             Bombeiros Militar do Pará: escala ordinária, extraordinária e diferenciada,
-            afastamentos, permutas/substituições, presença e estatísticas.
+            afastamentos, autorizações de substituição, presença e estatísticas.
           </p>
           <button
             onClick={() => setIsLoginModalOpen(true)}

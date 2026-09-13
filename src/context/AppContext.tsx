@@ -58,7 +58,6 @@ import {
   SolicitacaoServico,
   StatusSolicitacaoServico,
   TipoEscalaServico,
-  TipoSolicitacaoServico,
   Ubm,
   Usuario,
 } from '../types';
@@ -137,13 +136,11 @@ interface AppContextData {
 
   criarSolicitacaoServico: (dados: {
     ubmId: string;
-    tipo: TipoSolicitacaoServico;
     modalidade: ModalidadeSolicitacaoServico;
     horarioParcial?: string;
     localEvento?: string;
     escalaOrigemId: string;
     tipoEscalaOrigem: TipoEscalaServico;
-    escalaDestinoId?: string;
     indicadoId: string;
     motivo?: string;
   }) => Promise<void>;
@@ -874,17 +871,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [presencas, usuarioAtual],
   );
 
-  // --- Solicitações de serviço (Autorização de Substituição / Permuta) -----
+  // --- Solicitações de serviço (Autorização de Substituição) ---------------
   const criarSolicitacaoServico = useCallback(
     async (dados: {
       ubmId: string;
-      tipo: TipoSolicitacaoServico;
       modalidade: ModalidadeSolicitacaoServico;
       horarioParcial?: string;
       localEvento?: string;
       escalaOrigemId: string;
       tipoEscalaOrigem: TipoEscalaServico;
-      escalaDestinoId?: string;
       indicadoId: string;
       motivo?: string;
     }) => {
@@ -901,7 +896,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         await notificar(
           indicado.id,
           'solicitacao_servico',
-          `Você recebeu um pedido de ${dados.tipo === 'permuta' ? 'permuta' : 'substituição'} de escala.`,
+          'Você recebeu um pedido de autorização de substituição de escala.',
           `/sistema/solicitacoes`,
         );
       }

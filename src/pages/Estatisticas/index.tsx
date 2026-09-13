@@ -6,6 +6,7 @@ import { temPapel } from '../../types';
 export default function Estatisticas() {
   const {
     usuarioAtual,
+    usuarios,
     militares,
     funcoes,
     escalasOrdinarias,
@@ -32,11 +33,14 @@ export default function Estatisticas() {
     reforcos: contagemExtra.get(m.id) ?? 0,
   }));
 
-  const dadosSubstituicoesPermutas = militaresDaUbm.map((m) => ({
-    nome: m.nome,
-    substituicoes: solicitacoesServico.filter((s) => s.ubmId === ubmId && s.tipo === 'substituicao' && s.status === 'aprovada' && (s.solicitanteId === m.id || s.indicadoId === m.id)).length,
-    permutas: solicitacoesServico.filter((s) => s.ubmId === ubmId && s.tipo === 'permuta' && s.status === 'aprovada' && (s.solicitanteId === m.id || s.indicadoId === m.id)).length,
-  }));
+  const dadosAutorizacoesSubstituicao = militaresDaUbm.map((m) => {
+    const usuarioDoMilitar = usuarios.find((u) => u.militarId === m.id)?.id;
+    return {
+      nome: m.nome,
+      foiSubstituido: solicitacoesServico.filter((s) => s.ubmId === ubmId && s.status === 'aprovada' && s.solicitanteId === usuarioDoMilitar).length,
+      cobriuOutro: solicitacoesServico.filter((s) => s.ubmId === ubmId && s.status === 'aprovada' && s.indicadoId === usuarioDoMilitar).length,
+    };
+  });
 
   const contagemPresenca = new Map<string, { presente: number; atrasado: number; dispensa: number; falta: number }>();
   for (const p of presencas) {
@@ -64,7 +68,7 @@ export default function Estatisticas() {
     <div className="max-w-6xl mx-auto space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Estatísticas</h1>
-        <p className="mt-1 text-sm text-gray-500">Histórico de substituições, permutas, presença, reforços extraordinários e folgas acumuladas.</p>
+        <p className="mt-1 text-sm text-gray-500">Histórico de autorizações de substituição, presença, reforços extraordinários e folgas acumuladas.</p>
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -81,15 +85,15 @@ export default function Estatisticas() {
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <h2 className="text-sm font-semibold text-gray-700 mb-4">Substituições e permutas aprovadas por militar</h2>
+        <h2 className="text-sm font-semibold text-gray-700 mb-4">Autorizações de substituição aprovadas por militar</h2>
         <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={dadosSubstituicoesPermutas}>
+          <BarChart data={dadosAutorizacoesSubstituicao}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="nome" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
             <YAxis allowDecimals={false} />
             <Tooltip />
-            <Bar dataKey="substituicoes" fill="#2563eb" />
-            <Bar dataKey="permutas" fill="#059669" />
+            <Bar dataKey="foiSubstituido" name="Foi substituído" fill="#2563eb" />
+            <Bar dataKey="cobriuOutro" name="Cobriu outro militar" fill="#059669" />
           </BarChart>
         </ResponsiveContainer>
       </div>

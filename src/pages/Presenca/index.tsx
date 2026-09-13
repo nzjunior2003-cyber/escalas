@@ -43,23 +43,15 @@ export default function Presenca() {
 
   /**
    * Autorização de substituição aprovada (ver types.ts) nunca altera o
-   * registro de escala — então, pra saber quem de fato apresenta-se no dia,
-   * é preciso cruzar com `solicitacoesServico` aprovadas: tanto o lado
-   * "origem" (o titular saiu, o indicado assume) quanto o lado "destino" de
-   * uma permuta (o indicado saiu da vaga original, o titular assume).
+   * registro de escala — então, pra saber quem de fato se apresenta no dia,
+   * é preciso cruzar com `solicitacoesServico` aprovadas pra essa vaga.
    */
   const substitutoAprovado = (escalaId: string, tipoEscala: TipoEscalaServico) => {
-    const comoOrigem = solicitacoesServico.find(
+    const solicitacao = solicitacoesServico.find(
       (s) => s.status === 'aprovada' && s.tipoEscalaOrigem === tipoEscala && s.escalaOrigemId === escalaId,
     );
-    if (comoOrigem) return { militarUsuarioId: comoOrigem.indicadoId, tituloUsuarioId: comoOrigem.solicitanteId };
-
-    const comoDestino = solicitacoesServico.find(
-      (s) => s.status === 'aprovada' && s.tipo === 'permuta' && s.tipoEscalaOrigem === tipoEscala && s.escalaDestinoId === escalaId,
-    );
-    if (comoDestino) return { militarUsuarioId: comoDestino.solicitanteId, tituloUsuarioId: comoDestino.indicadoId };
-
-    return null;
+    if (!solicitacao) return null;
+    return { militarUsuarioId: solicitacao.indicadoId, tituloUsuarioId: solicitacao.solicitanteId };
   };
 
   const militarIdDoUsuario = (usuarioId: string) => usuarios.find((u) => u.id === usuarioId)?.militarId;

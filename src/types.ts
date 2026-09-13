@@ -242,19 +242,24 @@ export interface RegistroPresenca {
 }
 
 // ---------------------------------------------------------------------------
-// Autorização de Serviço (substituição) e Permuta
+// Autorização de Substituição de Serviço
 //
-// Fluxo: o solicitante ("sai") escolhe uma escala real já dele e indica o
-// substituto ("entra") -> o indicado precisa aceitar primeiro
-// (aguardando_indicado) -> só depois vai para aprovação do Comandante OU do
-// Escalante da UBM (aguardando_aprovacao) -> aprovada libera o PDF de
-// "Autorização de Serviço Extraordinário/Ordinário". Aprovar NUNCA altera o
-// registro de escala gerado pelo sistema — fica só registrado aqui, e é o
-// CMT de SOS quem, no dia, marca a presença do substituto (RegistroPresenca
-// aceita militarId diferente do da escala); mudar a escala em si continua
-// sendo exclusividade do escalante, de forma manual.
+// É via de mão única, NÃO uma permuta: o titular ("sai") pede autorização
+// pra um substituto ("entra") cobrir o serviço dele — o substituto não fica
+// "devendo" cobrir um serviço do titular depois, não há troca mútua.
+//
+// Fluxo: o solicitante escolhe uma escala real já dele e indica o
+// substituto -> o indicado precisa aceitar primeiro (aguardando_indicado)
+// -> só depois vai para aprovação do Comandante OU do Escalante da UBM
+// (aguardando_aprovacao) -> aprovada libera o PDF de "Autorização de
+// Serviço Extraordinário/Ordinário". Aprovar NUNCA altera o registro de
+// escala gerado pelo sistema — fica só registrado aqui, e é o CMT de SOS
+// quem, no dia, marca a presença do substituto (RegistroPresenca aceita
+// militarId diferente do da escala); mudar a escala em si continua sendo
+// exclusividade do escalante, de forma manual. Como a escala não muda, o
+// dia continua contando normalmente pro titular na equidade (ver
+// escala.ts) — ele não fica devendo nem entra em fila de recuperação.
 // ---------------------------------------------------------------------------
-export type TipoSolicitacaoServico = 'substituicao' | 'permuta';
 
 /** Integral: o substituto assume as 24h do serviço. Parcial: só uma faixa de horário (`horarioParcial`). */
 export type ModalidadeSolicitacaoServico = 'integral' | 'parcial';
@@ -282,7 +287,6 @@ export const STATUS_SOLICITACAO_LABELS: Record<StatusSolicitacaoServico, string>
 export interface SolicitacaoServico {
   id: string;
   ubmId: string;
-  tipo: TipoSolicitacaoServico;
   modalidade: ModalidadeSolicitacaoServico;
   /** Só quando modalidade === 'parcial' — ex.: "19h às 07h". */
   horarioParcial?: string;
@@ -291,8 +295,6 @@ export interface SolicitacaoServico {
   /** Escala (ordinária/extraordinária) do solicitante que originou o pedido. */
   escalaOrigemId: string;
   tipoEscalaOrigem: TipoEscalaServico;
-  /** Só em permuta: a escala do indicado que será trocada. */
-  escalaDestinoId?: string;
   solicitanteId: string;
   indicadoId: string;
   status: StatusSolicitacaoServico;
