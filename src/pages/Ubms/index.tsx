@@ -11,7 +11,16 @@ export default function Ubms() {
 
   const [isNovoOpen, setIsNovoOpen] = useState(false);
   const [editando, setEditando] = useState<Ubm | null>(null);
-  const [form, setForm] = useState<{ nome: string; sigla: string; logoDataUrl?: string }>({ nome: '', sigla: '' });
+  const [form, setForm] = useState<{ nome: string; sigla: string; logoDataUrl?: string; endereco: string; cep: string; bairro: string; cidade: string; email: string; telefone: string }>({
+    nome: '',
+    sigla: '',
+    endereco: '',
+    cep: '',
+    bairro: '',
+    cidade: '',
+    email: '',
+    telefone: '',
+  });
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const inputNovoRef = useRef<HTMLInputElement>(null);
@@ -45,8 +54,18 @@ export default function Ubms() {
     setSalvando(true);
     setErro(null);
     try {
-      await addUbm({ nome: form.nome, sigla: form.sigla, logoDataUrl: form.logoDataUrl });
-      setForm({ nome: '', sigla: '' });
+      await addUbm({
+        nome: form.nome,
+        sigla: form.sigla,
+        logoDataUrl: form.logoDataUrl,
+        endereco: form.endereco || undefined,
+        cep: form.cep || undefined,
+        bairro: form.bairro || undefined,
+        cidade: form.cidade || undefined,
+        email: form.email || undefined,
+        telefone: form.telefone || undefined,
+      });
+      setForm({ nome: '', sigla: '', endereco: '', cep: '', bairro: '', cidade: '', email: '', telefone: '' });
       setIsNovoOpen(false);
     } catch (erroCriar) {
       setErro(erroCriar instanceof Error ? erroCriar.message : 'Não foi possível criar a UBM.');
@@ -61,7 +80,17 @@ export default function Ubms() {
     setSalvando(true);
     setErro(null);
     try {
-      await updateUbm(editando.id, { nome: editando.nome, sigla: editando.sigla, logoDataUrl: editando.logoDataUrl });
+      await updateUbm(editando.id, {
+        nome: editando.nome,
+        sigla: editando.sigla,
+        logoDataUrl: editando.logoDataUrl,
+        endereco: editando.endereco,
+        cep: editando.cep,
+        bairro: editando.bairro,
+        cidade: editando.cidade,
+        email: editando.email,
+        telefone: editando.telefone,
+      });
       setEditando(null);
     } catch (erroEditar) {
       setErro(erroEditar instanceof Error ? erroEditar.message : 'Não foi possível salvar as alterações.');
@@ -134,7 +163,7 @@ export default function Ubms() {
 
       {isNovoOpen && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6 relative">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setIsNovoOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-500">
               <X className="w-5 h-5" />
             </button>
@@ -165,6 +194,35 @@ export default function Ubms() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
                 <input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex: 1º Grupamento de Bombeiros" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
               </div>
+              <p className="text-xs font-medium text-gray-500 pt-2 border-t border-gray-100">Endereço (mostrado no rodapé do PDF de escala)</p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Endereço</label>
+                <input value={form.endereco} onChange={(e) => setForm({ ...form, endereco: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bairro</label>
+                  <input value={form.bairro} onChange={(e) => setForm({ ...form, bairro: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">CEP</label>
+                  <input value={form.cep} onChange={(e) => setForm({ ...form, cep: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Cidade</label>
+                <input value={form.cidade} onChange={(e) => setForm({ ...form, cidade: e.target.value })} placeholder="Ex: Belém" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+                  <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
+                  <input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+                </div>
+              </div>
               <div className="mt-6 flex justify-end space-x-3">
                 <button type="button" onClick={() => setIsNovoOpen(false)} className="px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Cancelar</button>
                 <button type="submit" disabled={salvando} className="px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 disabled:opacity-50">
@@ -178,7 +236,7 @@ export default function Ubms() {
 
       {editando && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6 relative">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setEditando(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-500">
               <X className="w-5 h-5" />
             </button>
@@ -208,6 +266,35 @@ export default function Ubms() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
                 <input required value={editando.nome} onChange={(e) => setEditando({ ...editando, nome: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+              </div>
+              <p className="text-xs font-medium text-gray-500 pt-2 border-t border-gray-100">Endereço (mostrado no rodapé do PDF de escala)</p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Endereço</label>
+                <input value={editando.endereco ?? ''} onChange={(e) => setEditando({ ...editando, endereco: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bairro</label>
+                  <input value={editando.bairro ?? ''} onChange={(e) => setEditando({ ...editando, bairro: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">CEP</label>
+                  <input value={editando.cep ?? ''} onChange={(e) => setEditando({ ...editando, cep: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Cidade</label>
+                <input value={editando.cidade ?? ''} onChange={(e) => setEditando({ ...editando, cidade: e.target.value })} placeholder="Ex: Belém" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+                  <input type="email" value={editando.email ?? ''} onChange={(e) => setEditando({ ...editando, email: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
+                  <input value={editando.telefone ?? ''} onChange={(e) => setEditando({ ...editando, telefone: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+                </div>
               </div>
               <div className="mt-6 flex justify-end space-x-3">
                 <button type="button" onClick={() => setEditando(null)} className="px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Cancelar</button>

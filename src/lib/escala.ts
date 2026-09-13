@@ -47,7 +47,7 @@
  * equalização), neutralizando a recuperação; os motivos com fila não
  * recebem esse crédito, então continuam gerando prioridade normalmente.
  */
-import { addDays, differenceInCalendarDays, format, parseISO } from 'date-fns';
+import { addDays, differenceInCalendarDays, format, parseISO, startOfWeek } from 'date-fns';
 import {
   MOTIVOS_COM_FILA_DE_RECUPERACAO,
   type Afastamento,
@@ -60,6 +60,11 @@ export const FORMATO_DATA = 'yyyy-MM-dd';
 
 export function formatarDataISO(data: Date): string {
   return format(data, FORMATO_DATA);
+}
+
+/** Segunda-feira (yyyy-MM-dd) da semana à qual `data` (yyyy-MM-dd) pertence — usado pra achar o fechamento da semana. */
+export function semanaInicioDe(data: string): string {
+  return formatarDataISO(startOfWeek(parseISO(data), { weekStartsOn: 1 }));
 }
 
 export function militaresDaFuncao(militares: Militar[], ubmId: string, funcao: string): Militar[] {

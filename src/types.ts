@@ -67,8 +67,15 @@ export interface Ubm {
   id: string;
   nome: string;
   sigla: string;
-  /** Brasão da UBM (data URL, já redimensionado) — mostrado no painel da unidade após o login. */
+  /** Brasão da UBM (data URL, já redimensionado) — mostrado no painel da unidade após o login e no rodapé do PDF de escala. */
   logoDataUrl?: string;
+  /** Dados de contato — mostrados em itálico no rodapé do PDF de escala, ao lado do brasão. */
+  endereco?: string;
+  cep?: string;
+  bairro?: string;
+  cidade?: string;
+  email?: string;
+  telefone?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,7 +159,8 @@ export interface EscalaOrdinaria {
   funcao: string;
   data: string; // yyyy-MM-dd
   militarId: string;
-  origem: 'gerada' | 'manual';
+  /** 'diferenciada': espelhada automaticamente de uma EscalaDiferenciada (ver nota abaixo). */
+  origem: 'gerada' | 'manual' | 'diferenciada';
   criado_em: string;
 }
 
@@ -175,31 +183,27 @@ export interface EscalaExtraordinaria {
 }
 
 // ---------------------------------------------------------------------------
-// Escala diferenciada (a pedido do militar)
+// Escala diferenciada — militares que só podem servir em dias específicos.
+//
+// O escalante cadastra o militar/função/data; ao criar, o sistema já gera o
+// registro espelho em EscalaOrdinaria (origem 'diferenciada') apontado por
+// `escalaOrdinariaId` — é esse espelho que aparece no Kanban normal, entra
+// na conta de equidade e sai no PDF junto com todo mundo. Depois de
+// cadastrada, só o Comandante da UBM pode alterar ou remover (edição direta,
+// sem fluxo de solicitação/aprovação).
 // ---------------------------------------------------------------------------
 export interface EscalaDiferenciada {
   id: string;
   militarId: string;
   ubmId: string;
+  /** Id de `FuncaoUbm`. */
+  funcao: string;
   data: string;
   observacao?: string;
+  /** EscalaOrdinaria espelhada — criada junto (ver nota acima). */
+  escalaOrdinariaId: string;
+  criadoPorId: string;
   criado_em: string;
-}
-
-export type StatusSolicitacaoAlteracao = 'pendente' | 'aprovada' | 'recusada';
-
-/** Alteração de escala diferenciada pelo escalante — exige autorização do Comandante. */
-export interface SolicitacaoAlteracaoDiferenciada {
-  id: string;
-  escalaDiferenciadaId: string;
-  militarId: string;
-  ubmId: string;
-  solicitanteId: string;
-  motivo: string;
-  status: StatusSolicitacaoAlteracao;
-  criado_em: string;
-  resolvido_em?: string;
-  resolvidoPorId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +267,51 @@ export const STATUS_PRESENCA_LABELS: Record<StatusPresenca, string> = {
 };
 
 export type TipoEscalaServico = 'ordinaria' | 'extraordinaria';
+
+// ---------------------------------------------------------------------------
+// Fechamento / Histórico de escala
+//
+// "Fechar" uma semana é o que libera o PDF (ver Relatórios/Histórico) — só
+// existe um doc por (ubmId, tipo, semanaInicio), com id determinístico
+// `${ubmId}_${tipo}_${semanaInicio}`, guardando se está travada pra edição
+// agora. O escalante pode reabrir livremente pra editar de novo; cada vez
+// que fecha (a primeira ou depois de reabrir e editar), gera uma nova
+// entrada em HistoricoEscala com uma foto congelada de quem estava escalado
+// naquele momento, pra sempre refletir o que de fato foi publicado em cada
+// versão, mesmo que a escala mude depois de reaberta.
+// ---------------------------------------------------------------------------
+export interface FechamentoEscala {
+  id: string;
+  ubmId: string;
+  tipo: TipoEscalaServico;
+  semanaInicio: string;
+  travada: boolean;
+  versaoAtual: number;
+  fechadoPorId?: string;
+  fechado_em?: string;
+  reabertoPorId?: string;
+  reaberto_em?: string;
+}
+
+export interface LinhaHistoricoEscala {
+  funcaoId: string;
+  funcaoNome: string;
+  data: string;
+  militarNome: string;
+  /** Só em extraordinária. */
+  motivo?: string;
+}
+
+export interface HistoricoEscala {
+  id: string;
+  ubmId: string;
+  tipo: TipoEscalaServico;
+  semanaInicio: string;
+  versao: number;
+  linhas: LinhaHistoricoEscala[];
+  fechadoPorId: string;
+  fechado_em: string;
+}
 
 export interface RegistroPresenca {
   id: string;

@@ -50,7 +50,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
     { name: 'Presença', href: '/sistema/presenca', icon: ClipboardCheck, show: temUbm },
     { name: 'Reforços', href: '/sistema/reforcos', icon: Radio, show: isComando || isGestao },
     { name: 'Painel Regional', href: '/sistema/painel-regional', icon: BarChart3, show: isComando },
-    { name: 'Relatórios', href: '/sistema/relatorios', icon: FileBarChart, show: isGestao },
+    { name: 'Histórico', href: '/sistema/historico', icon: FileBarChart, show: isGestao },
     { name: 'Estatísticas', href: '/sistema/estatisticas', icon: PieChart, show: isGestao },
     { name: 'Usuários', href: '/sistema/usuarios', icon: ShieldCheck, show: isGestao || isMaster },
     { name: 'UBMs', href: '/sistema/ubms', icon: Building2, show: isMaster },

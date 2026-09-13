@@ -52,10 +52,11 @@ import {
   EscalaOrdinaria,
   FUNCOES_PADRAO,
   FuncaoUbm,
+  FechamentoEscala,
+  HistoricoEscala,
   Militar,
   ModalidadeSolicitacaoServico,
   RegistroPresenca,
-  SolicitacaoAlteracaoDiferenciada,
   SolicitacaoReforco,
   SolicitacaoServico,
   StatusSolicitacaoReforco,
@@ -74,11 +75,12 @@ interface AppContextData {
   escalasOrdinarias: EscalaOrdinaria[];
   escalasExtraordinarias: EscalaExtraordinaria[];
   escalasDiferenciadas: EscalaDiferenciada[];
-  solicitacoesAlteracaoDiferenciada: SolicitacaoAlteracaoDiferenciada[];
   afastamentos: Afastamento[];
   presencas: RegistroPresenca[];
   solicitacoesServico: SolicitacaoServico[];
   solicitacoesReforco: SolicitacaoReforco[];
+  fechamentosEscala: FechamentoEscala[];
+  historicoEscalas: HistoricoEscala[];
   alertas: Alerta[];
 
   usuarioAtual: Usuario | null;
@@ -134,10 +136,16 @@ interface AppContextData {
   criarEscalaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; militarIdEscolhido?: string }) => Promise<string>;
   alterarMilitarExtraordinaria: (id: string, militarId: string) => Promise<void>;
 
-  solicitarEscalaDiferenciada: (dados: { militarId: string; ubmId: string; data: string; observacao?: string }) => Promise<void>;
+  /** Só o escalante cadastra — cria o registro e já espelha em EscalaOrdinaria (origem 'diferenciada'). */
+  criarEscalaDiferenciada: (dados: { militarId: string; ubmId: string; funcao: string; data: string; observacao?: string }) => Promise<void>;
+  /** Só o Comandante da UBM altera depois de cadastrada. */
+  atualizarEscalaDiferenciada: (id: string, dados: { militarId?: string; funcao?: string; data?: string; observacao?: string }) => Promise<void>;
   removerEscalaDiferenciada: (id: string) => Promise<void>;
-  solicitarAlteracaoDiferenciada: (dados: { escalaDiferenciadaId: string; motivo: string }) => Promise<void>;
-  responderAlteracaoDiferenciada: (id: string, aprovar: boolean) => Promise<void>;
+
+  /** Libera o PDF da semana e grava uma versão no histórico com o que estava escalado no momento. */
+  fecharEscalaSemana: (params: { ubmId: string; tipo: TipoEscalaServico; semanaInicio: string }) => Promise<void>;
+  /** O próprio escalante pode reabrir pra editar de novo — a próxima vez que fechar gera nova versão no histórico. */
+  reabrirEscalaSemana: (params: { ubmId: string; tipo: TipoEscalaServico; semanaInicio: string }) => Promise<void>;
 
   addAfastamento: (dados: Omit<Afastamento, 'id' | 'criado_em' | 'criadoPorId'>) => Promise<void>;
   deleteAfastamento: (id: string) => Promise<void>;
@@ -295,14 +303,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const escalasOrdinarias = useColecao<EscalaOrdinaria>('escalas_ordinarias', isAuthenticated);
   const escalasExtraordinarias = useColecao<EscalaExtraordinaria>('escalas_extraordinarias', isAuthenticated);
   const escalasDiferenciadas = useColecao<EscalaDiferenciada>('escalas_diferenciadas', isAuthenticated);
-  const solicitacoesAlteracaoDiferenciada = useColecao<SolicitacaoAlteracaoDiferenciada>(
-    'solicitacoes_alteracao_diferenciada',
-    isAuthenticated,
-  );
   const afastamentos = useColecao<Afastamento>('afastamentos', isAuthenticated);
   const presencas = useColecao<RegistroPresenca>('presencas', isAuthenticated);
   const solicitacoesServico = useColecao<SolicitacaoServico>('solicitacoes_servico', isAuthenticated);
   const solicitacoesReforco = useColecao<SolicitacaoReforco>('solicitacoes_reforco', isAuthenticated);
+  const fechamentosEscala = useColecao<FechamentoEscala>('fechamentos_escala', isAuthenticated);
+  const historicoEscalas = useColecao<HistoricoEscala>('historico_escalas', isAuthenticated);
   const alertas = useColecao<Alerta>('alertas', isAuthenticated, {
     campo: 'usuarioId',
     valor: usuarioAtual?.id ?? '',
@@ -905,91 +911,148 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [solicitacoesReforco, comandos, usuarios, escalasExtraordinarias, usuarioAtual, notificar],
   );
 
-  // --- Escala diferenciada -------------------------------------------------
-  const solicitarEscalaDiferenciada = useCallback(
-    async (dados: { militarId: string; ubmId: string; data: string; observacao?: string }) => {
+  // --- Escala diferenciada ---------------------------------------------------
+  const criarEscalaDiferenciada = useCallback(
+    async (dados: { militarId: string; ubmId: string; funcao: string; data: string; observacao?: string }) => {
       const db = requireDb();
+      const agora = new Date().toISOString();
+
+      // Se já existe uma escala ordinária nesse dia/função (de uma geração
+      // anterior), o dia diferenciado assume esse mesmo registro em vez de
+      // duplicar — só um militar por dia/função.
+      const existente = escalasOrdinarias.find(
+        (e) => e.ubmId === dados.ubmId && e.funcao === dados.funcao && e.data === dados.data,
+      );
+
+      let escalaOrdinariaId: string;
+      if (existente) {
+        escalaOrdinariaId = existente.id;
+        await updateDoc(doc(db, 'escalas_ordinarias', existente.id), {
+          militarId: dados.militarId,
+          origem: 'diferenciada',
+        });
+      } else {
+        const refOrdinaria = await addDoc(collection(db, 'escalas_ordinarias'), {
+          ubmId: dados.ubmId,
+          funcao: dados.funcao,
+          data: dados.data,
+          militarId: dados.militarId,
+          origem: 'diferenciada',
+          criado_em: agora,
+        });
+        escalaOrdinariaId = refOrdinaria.id;
+      }
+
       await addDoc(collection(db, 'escalas_diferenciadas'), {
-        ...dados,
-        criado_em: new Date().toISOString(),
+        ...semIndefinidosParaCriar(dados),
+        escalaOrdinariaId,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: agora,
       });
     },
-    [],
+    [usuarioAtual, escalasOrdinarias],
   );
 
-  const removerEscalaDiferenciada = useCallback(async (id: string) => {
-    const db = requireDb();
-    await deleteDoc(doc(db, 'escalas_diferenciadas', id));
-  }, []);
-
-  const solicitarAlteracaoDiferenciada = useCallback(
-    async (dados: { escalaDiferenciadaId: string; motivo: string }) => {
+  const atualizarEscalaDiferenciada = useCallback(
+    async (id: string, dados: { militarId?: string; funcao?: string; data?: string; observacao?: string }) => {
       const db = requireDb();
-      const escala = escalasDiferenciadas.find((e) => e.id === dados.escalaDiferenciadaId);
-      if (!escala) throw new Error('Escala diferenciada não encontrada.');
+      const atual = escalasDiferenciadas.find((e) => e.id === id);
+      if (!atual) throw new Error('Escala diferenciada não encontrada.');
 
-      await addDoc(collection(db, 'solicitacoes_alteracao_diferenciada'), {
-        escalaDiferenciadaId: dados.escalaDiferenciadaId,
-        militarId: escala.militarId,
-        ubmId: escala.ubmId,
-        solicitanteId: usuarioAtual?.id ?? '',
-        motivo: dados.motivo,
-        status: 'pendente',
-        criado_em: new Date().toISOString(),
-      });
-
-      const militar = militares.find((m) => m.id === escala.militarId);
-      const usuarioMilitar = usuarios.find((u) => u.militarId === escala.militarId);
-      const comandantes = usuarios.filter((u) => u.ubmId === escala.ubmId && u.papeis?.includes('comandante'));
-
-      if (usuarioMilitar) {
-        await notificar(
-          usuarioMilitar.id,
-          'alteracao_diferenciada',
-          `O escalante solicitou alterar sua escala diferenciada de ${escala.data}. Motivo: ${dados.motivo}`,
-        );
-      }
-      await Promise.all(
-        comandantes.map((c) =>
-          notificar(
-            c.id,
-            'alteracao_diferenciada',
-            `Alteração de escala diferenciada de ${militar?.nome ?? 'um militar'} em ${escala.data} aguarda sua autorização.`,
-          ),
-        ),
+      await updateDoc(doc(db, 'escalas_diferenciadas', id), semIndefinidosParaAtualizar(dados));
+      await updateDoc(
+        doc(db, 'escalas_ordinarias', atual.escalaOrdinariaId),
+        semIndefinidosParaAtualizar({ militarId: dados.militarId, funcao: dados.funcao, data: dados.data }),
       );
     },
-    [escalasDiferenciadas, militares, usuarios, usuarioAtual, notificar],
+    [escalasDiferenciadas],
   );
 
-  const responderAlteracaoDiferenciada = useCallback(
-    async (id: string, aprovar: boolean) => {
+  const removerEscalaDiferenciada = useCallback(
+    async (id: string) => {
       const db = requireDb();
-      const solicitacao = solicitacoesAlteracaoDiferenciada.find((s) => s.id === id);
-      if (!solicitacao) throw new Error('Solicitação não encontrada.');
-
-      await updateDoc(doc(db, 'solicitacoes_alteracao_diferenciada', id), {
-        status: aprovar ? 'aprovada' : 'recusada',
-        resolvido_em: new Date().toISOString(),
-        resolvidoPorId: usuarioAtual?.id ?? '',
-      });
-
-      if (aprovar) {
-        await deleteDoc(doc(db, 'escalas_diferenciadas', solicitacao.escalaDiferenciadaId));
+      const atual = escalasDiferenciadas.find((e) => e.id === id);
+      if (atual) {
+        await deleteDoc(doc(db, 'escalas_ordinarias', atual.escalaOrdinariaId)).catch(() => undefined);
       }
-
-      const usuarioMilitar = usuarios.find((u) => u.militarId === solicitacao.militarId);
-      if (usuarioMilitar) {
-        await notificar(
-          usuarioMilitar.id,
-          'alteracao_diferenciada',
-          aprovar
-            ? 'O Comandante autorizou a alteração da sua escala diferenciada.'
-            : 'O Comandante negou a alteração da sua escala diferenciada — ela permanece como estava.',
-        );
-      }
+      await deleteDoc(doc(db, 'escalas_diferenciadas', id));
     },
-    [solicitacoesAlteracaoDiferenciada, usuarios, usuarioAtual, notificar],
+    [escalasDiferenciadas],
+  );
+
+  // --- Fechamento / Histórico de escala --------------------------------------
+  const fecharEscalaSemana = useCallback(
+    async (params: { ubmId: string; tipo: TipoEscalaServico; semanaInicio: string }) => {
+      const db = requireDb();
+      const docId = `${params.ubmId}_${params.tipo}_${params.semanaInicio}`;
+      const atual = fechamentosEscala.find((f) => f.id === docId);
+      const novaVersao = (atual?.versaoAtual ?? 0) + 1;
+      const agora = new Date().toISOString();
+
+      const dias = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(`${params.semanaInicio}T00:00:00`);
+        d.setDate(d.getDate() + i);
+        return d.toISOString().slice(0, 10);
+      });
+      const escalas = params.tipo === 'ordinaria' ? escalasOrdinarias : escalasExtraordinarias;
+      const linhas = escalas
+        .filter((e) => e.ubmId === params.ubmId && dias.includes(e.data))
+        .map((e) => ({
+          funcaoId: e.funcao,
+          funcaoNome: funcoes.find((f) => f.id === e.funcao)?.nome ?? 'Função removida',
+          data: e.data,
+          militarNome: (() => {
+            const militar = militares.find((m) => m.id === e.militarId);
+            return militar ? `${militar.posto} ${militar.nome}`.trim() : 'Militar removido';
+          })(),
+          ...('motivo' in e && e.motivo ? { motivo: e.motivo } : {}),
+        }));
+
+      await setDoc(
+        doc(db, 'fechamentos_escala', docId),
+        {
+          ubmId: params.ubmId,
+          tipo: params.tipo,
+          semanaInicio: params.semanaInicio,
+          travada: true,
+          versaoAtual: novaVersao,
+          fechadoPorId: usuarioAtual?.id ?? '',
+          fechado_em: agora,
+        },
+        { merge: true },
+      );
+
+      await addDoc(collection(db, 'historico_escalas'), {
+        ubmId: params.ubmId,
+        tipo: params.tipo,
+        semanaInicio: params.semanaInicio,
+        versao: novaVersao,
+        linhas,
+        fechadoPorId: usuarioAtual?.id ?? '',
+        fechado_em: agora,
+      });
+    },
+    [fechamentosEscala, escalasOrdinarias, escalasExtraordinarias, funcoes, militares, usuarioAtual],
+  );
+
+  const reabrirEscalaSemana = useCallback(
+    async (params: { ubmId: string; tipo: TipoEscalaServico; semanaInicio: string }) => {
+      const db = requireDb();
+      const docId = `${params.ubmId}_${params.tipo}_${params.semanaInicio}`;
+      await setDoc(
+        doc(db, 'fechamentos_escala', docId),
+        {
+          ubmId: params.ubmId,
+          tipo: params.tipo,
+          semanaInicio: params.semanaInicio,
+          travada: false,
+          reabertoPorId: usuarioAtual?.id ?? '',
+          reaberto_em: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+    },
+    [usuarioAtual],
   );
 
   // --- Afastamentos ---------------------------------------------------------
@@ -1135,11 +1198,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       escalasOrdinarias,
       escalasExtraordinarias,
       escalasDiferenciadas,
-      solicitacoesAlteracaoDiferenciada,
       afastamentos,
       presencas,
       solicitacoesServico,
       solicitacoesReforco,
+      fechamentosEscala,
+      historicoEscalas,
       alertas,
       usuarioAtual,
       isAuthenticated,
@@ -1172,10 +1236,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
-      solicitarEscalaDiferenciada,
+      criarEscalaDiferenciada,
+      atualizarEscalaDiferenciada,
       removerEscalaDiferenciada,
-      solicitarAlteracaoDiferenciada,
-      responderAlteracaoDiferenciada,
+      fecharEscalaSemana,
+      reabrirEscalaSemana,
       addAfastamento,
       deleteAfastamento,
       registrarPresenca,
@@ -1195,11 +1260,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       escalasOrdinarias,
       escalasExtraordinarias,
       escalasDiferenciadas,
-      solicitacoesAlteracaoDiferenciada,
       afastamentos,
       presencas,
       solicitacoesServico,
       solicitacoesReforco,
+      fechamentosEscala,
+      historicoEscalas,
       alertas,
       usuarioAtual,
       isAuthenticated,
@@ -1231,10 +1297,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
-      solicitarEscalaDiferenciada,
+      criarEscalaDiferenciada,
+      atualizarEscalaDiferenciada,
       removerEscalaDiferenciada,
-      solicitarAlteracaoDiferenciada,
-      responderAlteracaoDiferenciada,
+      fecharEscalaSemana,
+      reabrirEscalaSemana,
       addAfastamento,
       deleteAfastamento,
       registrarPresenca,

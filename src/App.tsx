@@ -11,7 +11,7 @@ import Escala from './pages/Escala';
 import Solicitacoes from './pages/Solicitacoes';
 import Afastamentos from './pages/Afastamentos';
 import Presenca from './pages/Presenca';
-import Relatorios from './pages/Relatorios';
+import Historico from './pages/Historico';
 import Estatisticas from './pages/Estatisticas';
 import Usuarios from './pages/Usuarios';
 import Ubms from './pages/Ubms';
@@ -37,7 +37,7 @@ export default function App() {
                 <Route path="solicitacoes" element={<Solicitacoes />} />
                 <Route path="afastamentos" element={<Afastamentos />} />
                 <Route path="presenca" element={<Presenca />} />
-                <Route path="relatorios" element={<Relatorios />} />
+                <Route path="historico" element={<Historico />} />
                 <Route path="estatisticas" element={<Estatisticas />} />
                 <Route path="usuarios" element={<Usuarios />} />
                 <Route path="ubms" element={<Ubms />} />

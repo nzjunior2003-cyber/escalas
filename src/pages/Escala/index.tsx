@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarDays, Plus, Sparkles } from 'lucide-react';
+import { CalendarDays, Plus, Sparkles, Lock } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO } from '../../lib/escala';
+import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, semanaInicioDe } from '../../lib/escala';
 import { temPapel } from '../../types';
 
 type Aba = 'ordinaria' | 'extraordinaria' | 'diferenciada';
@@ -27,7 +27,7 @@ function intervaloPorGranularidade(granularidade: Granularidade, base: Date): { 
 }
 
 export default function Escala() {
-  const { usuarioAtual, militares, funcoes, escalasOrdinarias, gerarEPersistirEscalaOrdinaria, updateEscalaOrdinaria } = useApp();
+  const { usuarioAtual, militares, funcoes, escalasOrdinarias, fechamentosEscala, gerarEPersistirEscalaOrdinaria, updateEscalaOrdinaria } = useApp();
   const [aba, setAba] = useState<Aba>('ordinaria');
   const [granularidade, setGranularidade] = useState<Granularidade>('semanal');
   const [funcaoSelecionada, setFuncaoSelecionada] = useState<string>('');
@@ -44,6 +44,11 @@ export default function Escala() {
   const nomeDaFuncaoSelecionada = funcoes.find((f) => f.id === funcaoSelecionada)?.nome ?? '';
 
   const militaresDaFuncaoNaUbm = militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(funcaoSelecionada));
+
+  const estaTravada = (data: string) => {
+    const docId = `${ubmId}_ordinaria_${semanaInicioDe(data)}`;
+    return fechamentosEscala.find((f) => f.id === docId)?.travada ?? false;
+  };
 
   const handleGerar = async () => {
     setGerando(true);
@@ -125,10 +130,12 @@ export default function Escala() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
               {dias.map((dia) => {
                 const doDia = escalasDoPeriodo.filter((e) => e.data === dia);
+                const travada = estaTravada(dia);
                 return (
                   <div key={dia} className="bg-white rounded-lg border border-gray-200 p-3 min-h-[140px]">
-                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
                       {format(new Date(dia + 'T00:00:00'), "EEE dd/MM", { locale: ptBR })}
+                      {travada && <span title="Semana fechada"><Lock className="w-3 h-3 text-gray-400" /></span>}
                     </p>
                     <div className="space-y-2">
                       {doDia.length === 0 && <p className="text-xs text-gray-400">Sem escala</p>}
@@ -137,7 +144,10 @@ export default function Escala() {
                         return (
                           <div key={e.id} className="bg-red-50 border border-red-100 rounded-md p-2 text-xs">
                             <p className="font-medium text-red-900">{militar?.nome ?? 'Militar removido'}</p>
-                            {isEscalante && (
+                            {e.origem === 'diferenciada' && (
+                              <p className="text-[10px] uppercase text-amber-600 font-semibold">diferenciada</p>
+                            )}
+                            {isEscalante && !travada && e.origem !== 'diferenciada' && (
                               <select
                                 className="mt-1 w-full text-xs border-gray-200 rounded"
                                 value={e.militarId}
@@ -193,7 +203,7 @@ export default function Escala() {
 }
 
 function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante: boolean }) {
-  const { militares, funcoes, escalasExtraordinarias, criarEscalaExtraordinaria, alterarMilitarExtraordinaria } = useApp();
+  const { militares, funcoes, escalasExtraordinarias, fechamentosEscala, criarEscalaExtraordinaria, alterarMilitarExtraordinaria } = useApp();
   const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
   const [form, setForm] = useState({ funcao: '', data: formatarDataISO(new Date()), motivo: '' });
   const [criando, setCriando] = useState(false);
@@ -204,6 +214,10 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
 
   const doUbm = escalasExtraordinarias.filter((e) => e.ubmId === ubmId).sort((a, b) => b.data.localeCompare(a.data));
   const nomeDaFuncao = (funcaoId: string) => funcoes.find((f) => f.id === funcaoId)?.nome ?? 'Função removida';
+  const estaTravada = (data: string) => {
+    const docId = `${ubmId}_extraordinaria_${semanaInicioDe(data)}`;
+    return fechamentosEscala.find((f) => f.id === docId)?.travada ?? false;
+  };
 
   const handleCriar = async (e: FormEvent) => {
     e.preventDefault();
@@ -258,6 +272,7 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
             {doUbm.map((e) => {
               const sugerido = militares.find((m) => m.id === e.militarSugeridoId);
               const candidatos = militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(e.funcao));
+              const travada = estaTravada(e.data);
 
               const handleAlterar = async (novoMilitarId: string) => {
                 try {
@@ -274,7 +289,7 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
                   <td className="px-4 py-2">{e.motivo}</td>
                   <td className="px-4 py-2 text-gray-500">{sugerido?.nome ?? '—'}</td>
                   <td className="px-4 py-2">
-                    {isEscalante ? (
+                    {isEscalante && !travada ? (
                       <select value={e.militarId} onChange={(ev) => handleAlterar(ev.target.value)} className="border border-gray-200 rounded text-sm">
                         {candidatos.map((m) => (
                           <option key={m.id} value={m.id}>
@@ -283,7 +298,10 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
                         ))}
                       </select>
                     ) : (
-                      militares.find((m) => m.id === e.militarId)?.nome ?? '—'
+                      <span className="inline-flex items-center gap-1">
+                        {militares.find((m) => m.id === e.militarId)?.nome ?? '—'}
+                        {travada && <span title="Semana fechada"><Lock className="w-3 h-3 text-gray-400" /></span>}
+                      </span>
                     )}
                     {e.militarId !== e.militarSugeridoId && (
                       <span className="ml-2 text-[10px] uppercase text-amber-600 font-semibold">alterado</span>
@@ -304,69 +322,96 @@ function AbaDiferenciada({ ubmId }: { ubmId: string }) {
   const {
     usuarioAtual,
     militares,
+    funcoes,
     escalasDiferenciadas,
-    solicitacoesAlteracaoDiferenciada,
-    solicitarEscalaDiferenciada,
+    criarEscalaDiferenciada,
+    atualizarEscalaDiferenciada,
     removerEscalaDiferenciada,
-    solicitarAlteracaoDiferenciada,
-    responderAlteracaoDiferenciada,
   } = useApp();
 
   const isEscalante = temPapel(usuarioAtual, 'escalante');
   const isComandante = temPapel(usuarioAtual, 'comandante');
-  const meuMilitarId = usuarioAtual?.militarId;
+  const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
+  const militaresDaUbm = militares.filter((m) => m.ubmId === ubmId && m.ativo);
 
-  const [novaData, setNovaData] = useState(formatarDataISO(new Date()));
-  const [observacao, setObservacao] = useState('');
-  const [motivoAlteracao, setMotivoAlteracao] = useState<Record<string, string>>({});
+  const [form, setForm] = useState({ militarId: '', funcao: '', data: formatarDataISO(new Date()), observacao: '' });
+  const [criando, setCriando] = useState(false);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [edicao, setEdicao] = useState({ militarId: '', funcao: '', data: '', observacao: '' });
+
+  useEffect(() => {
+    if (!form.funcao && funcoesDaUbm.length > 0) setForm((f) => ({ ...f, funcao: funcoesDaUbm[0].id }));
+  }, [form.funcao, funcoesDaUbm]);
 
   const doUbm = escalasDiferenciadas.filter((e) => e.ubmId === ubmId).sort((a, b) => a.data.localeCompare(b.data));
-  const pendentes = solicitacoesAlteracaoDiferenciada.filter((s) => s.ubmId === ubmId && s.status === 'pendente');
+  const nomeDaFuncao = (id: string) => funcoes.find((f) => f.id === id)?.nome ?? 'Função removida';
 
-  const handleSolicitar = async (e: FormEvent) => {
+  const handleCriar = async (e: FormEvent) => {
     e.preventDefault();
-    if (!meuMilitarId) return;
-    await solicitarEscalaDiferenciada({ militarId: meuMilitarId, ubmId, data: novaData, observacao });
-    setObservacao('');
+    if (!form.militarId || !form.funcao) return;
+    setCriando(true);
+    try {
+      await criarEscalaDiferenciada({ ...form, ubmId });
+      setForm({ militarId: '', funcao: funcoesDaUbm[0]?.id ?? '', data: formatarDataISO(new Date()), observacao: '' });
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível cadastrar a escala diferenciada.');
+    } finally {
+      setCriando(false);
+    }
+  };
+
+  const iniciarEdicao = (id: string) => {
+    const atual = doUbm.find((e) => e.id === id);
+    if (!atual) return;
+    setEditandoId(id);
+    setEdicao({ militarId: atual.militarId, funcao: atual.funcao, data: atual.data, observacao: atual.observacao ?? '' });
+  };
+
+  const salvarEdicao = async () => {
+    if (!editandoId) return;
+    try {
+      await atualizarEscalaDiferenciada(editandoId, edicao);
+      setEditandoId(null);
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível salvar a alteração.');
+    }
   };
 
   return (
     <div className="space-y-6">
-      {meuMilitarId && (
-        <form onSubmit={handleSolicitar} className="bg-white p-4 rounded-lg border border-gray-200 flex flex-wrap gap-3 items-end">
+      <p className="text-sm text-gray-500 bg-white border border-gray-200 rounded-lg p-4">
+        Pra militares que só podem servir em dias específicos. Ao cadastrar, o dia já entra na escala ordinária normal
+        (Kanban, PDF e contagem de equidade) — depois de cadastrado, só o Comandante da UBM pode alterar ou remover.
+      </p>
+
+      {isEscalante && (
+        <form onSubmit={handleCriar} className="bg-white p-4 rounded-lg border border-gray-200 flex flex-wrap gap-3 items-end">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Militar</label>
+            <select value={form.militarId} onChange={(e) => setForm({ ...form, militarId: e.target.value })} className="border border-gray-300 rounded-md text-sm py-2 px-3">
+              <option value="">Selecione</option>
+              {militaresDaUbm.map((m) => <option key={m.id} value={m.id}>{m.posto} {m.nome}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
+            <select value={form.funcao} onChange={(e) => setForm({ ...form, funcao: e.target.value })} className="border border-gray-300 rounded-md text-sm py-2 px-3">
+              {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+              {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+            </select>
+          </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Data</label>
-            <input type="date" value={novaData} onChange={(e) => setNovaData(e.target.value)} className="border border-gray-300 rounded-md text-sm py-2 px-3" />
+            <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} className="border border-gray-300 rounded-md text-sm py-2 px-3" />
           </div>
           <div className="flex-1 min-w-[200px]">
             <label className="block text-xs font-medium text-gray-500 mb-1">Observação (opcional)</label>
-            <input value={observacao} onChange={(e) => setObservacao(e.target.value)} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
+            <input value={form.observacao} onChange={(e) => setForm({ ...form, observacao: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
           </div>
-          <button type="submit" className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800">
-            <CalendarDays className="-ml-1 mr-2 h-4 w-4" /> Indicar dia diferenciado
+          <button type="submit" disabled={criando || !form.militarId || !form.funcao} className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50">
+            <CalendarDays className="-ml-1 mr-2 h-4 w-4" /> Cadastrar dia diferenciado
           </button>
         </form>
-      )}
-
-      {isComandante && pendentes.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-amber-900">Alterações de escala diferenciada aguardando sua autorização</h3>
-          {pendentes.map((s) => {
-            const militar = militares.find((m) => m.id === s.militarId);
-            return (
-              <div key={s.id} className="flex items-center justify-between bg-white rounded-md p-3 border border-amber-100">
-                <div className="text-sm">
-                  <p className="font-medium text-gray-900">{militar?.nome ?? 'Militar'}</p>
-                  <p className="text-gray-500">Motivo: {s.motivo}</p>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => responderAlteracaoDiferenciada(s.id, true)} className="px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Autorizar</button>
-                  <button onClick={() => responderAlteracaoDiferenciada(s.id, false)} className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300">Negar</button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       )}
 
       <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
@@ -375,6 +420,7 @@ function AbaDiferenciada({ ubmId }: { ubmId: string }) {
             <tr>
               <th className="px-4 py-2 text-left font-medium text-gray-500">Data</th>
               <th className="px-4 py-2 text-left font-medium text-gray-500">Militar</th>
+              <th className="px-4 py-2 text-left font-medium text-gray-500">Função</th>
               <th className="px-4 py-2 text-left font-medium text-gray-500">Observação</th>
               <th className="relative px-4 py-2"></th>
             </tr>
@@ -382,38 +428,50 @@ function AbaDiferenciada({ ubmId }: { ubmId: string }) {
           <tbody className="divide-y divide-gray-100">
             {doUbm.map((e) => {
               const militar = militares.find((m) => m.id === e.militarId);
-              const jaTemPendencia = solicitacoesAlteracaoDiferenciada.some((s) => s.escalaDiferenciadaId === e.id && s.status === 'pendente');
+              const emEdicao = editandoId === e.id;
               return (
                 <tr key={e.id}>
-                  <td className="px-4 py-2">{e.data}</td>
-                  <td className="px-4 py-2">{militar?.nome ?? '—'}</td>
-                  <td className="px-4 py-2">{e.observacao || '—'}</td>
-                  <td className="px-4 py-2 text-right">
-                    {e.militarId === meuMilitarId ? (
-                      <button onClick={() => removerEscalaDiferenciada(e.id)} className="text-xs text-red-600 hover:text-red-800">Remover</button>
-                    ) : isEscalante && !jaTemPendencia ? (
-                      <div className="flex gap-2 items-center justify-end">
-                        <input
-                          placeholder="Motivo da alteração"
-                          value={motivoAlteracao[e.id] ?? ''}
-                          onChange={(ev) => setMotivoAlteracao({ ...motivoAlteracao, [e.id]: ev.target.value })}
-                          className="border border-gray-200 rounded text-xs px-2 py-1"
-                        />
-                        <button
-                          onClick={() => solicitarAlteracaoDiferenciada({ escalaDiferenciadaId: e.id, motivo: motivoAlteracao[e.id] ?? '' })}
-                          className="text-xs text-amber-700 hover:text-amber-900 font-medium"
-                        >
-                          Solicitar alteração
-                        </button>
-                      </div>
-                    ) : jaTemPendencia ? (
-                      <span className="text-xs text-amber-600">Alteração pendente</span>
-                    ) : null}
-                  </td>
+                  {emEdicao ? (
+                    <>
+                      <td className="px-4 py-2"><input type="date" value={edicao.data} onChange={(ev) => setEdicao({ ...edicao, data: ev.target.value })} className="border border-gray-300 rounded text-xs py-1 px-1" /></td>
+                      <td className="px-4 py-2">
+                        <select value={edicao.militarId} onChange={(ev) => setEdicao({ ...edicao, militarId: ev.target.value })} className="border border-gray-300 rounded text-xs py-1 px-1">
+                          {militaresDaUbm.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-4 py-2">
+                        <select value={edicao.funcao} onChange={(ev) => setEdicao({ ...edicao, funcao: ev.target.value })} className="border border-gray-300 rounded text-xs py-1 px-1">
+                          {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-4 py-2"><input value={edicao.observacao} onChange={(ev) => setEdicao({ ...edicao, observacao: ev.target.value })} className="border border-gray-300 rounded text-xs py-1 px-1 w-full" /></td>
+                      <td className="px-4 py-2 text-right space-x-2">
+                        <button onClick={salvarEdicao} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium">Salvar</button>
+                        <button onClick={() => setEditandoId(null)} className="text-xs text-gray-500 hover:text-gray-700">Cancelar</button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-4 py-2">{e.data}</td>
+                      <td className="px-4 py-2">{militar?.nome ?? '—'}</td>
+                      <td className="px-4 py-2">{nomeDaFuncao(e.funcao)}</td>
+                      <td className="px-4 py-2">{e.observacao || '—'}</td>
+                      <td className="px-4 py-2 text-right space-x-3">
+                        {isComandante ? (
+                          <>
+                            <button onClick={() => iniciarEdicao(e.id)} className="text-xs text-red-600 hover:text-red-800">Editar</button>
+                            <button onClick={() => removerEscalaDiferenciada(e.id)} className="text-xs text-gray-500 hover:text-red-700">Remover</button>
+                          </>
+                        ) : (
+                          <span className="text-xs text-gray-400">Só o Comandante altera</span>
+                        )}
+                      </td>
+                    </>
+                  )}
                 </tr>
               );
             })}
-            {doUbm.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Nenhuma escala diferenciada registrada.</td></tr>}
+            {doUbm.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Nenhuma escala diferenciada registrada.</td></tr>}
           </tbody>
         </table>
       </div>
