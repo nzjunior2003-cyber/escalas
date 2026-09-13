@@ -235,40 +235,28 @@ export default function Solicitacoes() {
         </div>
       )}
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Modalidade</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Substituto indicado</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Status</th>
-              <th className="relative px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {minhasSolicitacoesFeitas.map((s) => (
-              <tr key={s.id}>
-                <td className="px-4 py-2">{MODALIDADE_SOLICITACAO_LABELS[s.modalidade]}</td>
-                <td className="px-4 py-2">{nomeUsuario(s.indicadoId)}</td>
-                <td className="px-4 py-2">{STATUS_SOLICITACAO_LABELS[s.status]}</td>
-                <td className="px-4 py-2 text-right">
-                  {s.status === 'aprovada' && (
-                    <button
-                      onClick={() => gerarPdf(s)}
-                      disabled={gerandoPdfId === s.id}
-                      className="inline-flex items-center px-2.5 py-1.5 border border-transparent rounded-md text-xs font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50"
-                    >
-                      <FileSignature className="-ml-1 mr-1.5 h-3.5 w-3.5" /> {gerandoPdfId === s.id ? 'Gerando...' : 'Gerar PDF'}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {minhasSolicitacoesFeitas.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Você ainda não fez solicitações.</td></tr>
-            )}
-          </tbody>
-        </table>
+      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+        {minhasSolicitacoesFeitas.length === 0 ? (
+          <p className="px-4 py-8 text-center text-gray-400">Você ainda não fez solicitações.</p>
+        ) : (
+          minhasSolicitacoesFeitas.map((s) => (
+            <div key={s.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-gray-900">{MODALIDADE_SOLICITACAO_LABELS[s.modalidade]} — {nomeUsuario(s.indicadoId)}</div>
+                <div className="text-gray-500">{STATUS_SOLICITACAO_LABELS[s.status]}</div>
+              </div>
+              {s.status === 'aprovada' && (
+                <button
+                  onClick={() => gerarPdf(s)}
+                  disabled={gerandoPdfId === s.id}
+                  className="shrink-0 inline-flex items-center justify-center px-2.5 py-1.5 border border-transparent rounded-md text-xs font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50"
+                >
+                  <FileSignature className="-ml-1 mr-1.5 h-3.5 w-3.5" /> {gerandoPdfId === s.id ? 'Gerando...' : 'Gerar PDF'}
+                </button>
+              )}
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

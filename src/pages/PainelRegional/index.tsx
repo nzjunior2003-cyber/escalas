@@ -181,19 +181,20 @@ function VisaoUbm({ ubmId, nomeUbm, comandoOrigemId }: { ubmId: string; nomeUbm:
 
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Efetivo por cargo e função (total: {matrizEfetivo.totalGeral})</h3>
-        <div className="overflow-x-auto">
+        <p className="text-[11px] text-gray-400 mb-1 sm:hidden">Arraste a tabela para o lado para ver todas as colunas →</p>
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
           <table className="min-w-full text-xs divide-y divide-gray-200">
             <thead>
               <tr>
-                <th className="px-3 py-2 text-left font-medium text-gray-500">Cargo</th>
-                {matrizEfetivo.funcoes.map((f) => <th key={f.id} className="px-3 py-2 text-center font-medium text-gray-500">{f.nome}</th>)}
-                <th className="px-3 py-2 text-center font-medium text-gray-700">Total</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-500 sticky left-0 bg-white">Cargo</th>
+                {matrizEfetivo.funcoes.map((f) => <th key={f.id} className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">{f.nome}</th>)}
+                <th className="px-3 py-2 text-center font-medium text-gray-700 whitespace-nowrap">Total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {matrizEfetivo.linhas.map((l) => (
                 <tr key={l.cargo}>
-                  <td className="px-3 py-2 font-medium text-gray-800">{l.cargo}</td>
+                  <td className="px-3 py-2 font-medium text-gray-800 sticky left-0 bg-white whitespace-nowrap">{l.cargo}</td>
                   {matrizEfetivo.funcoes.map((f) => <td key={f.id} className="px-3 py-2 text-center text-gray-600">{l.porFuncao[f.id] ?? 0}</td>)}
                   <td className="px-3 py-2 text-center font-semibold text-gray-800">{l.total}</td>
                 </tr>
@@ -208,13 +209,14 @@ function VisaoUbm({ ubmId, nomeUbm, comandoOrigemId }: { ubmId: string; nomeUbm:
 
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Escala ordinária desta semana ({format(new Date(semanaInicio + 'T00:00:00'), 'dd/MM')} a {format(new Date(diasDaSemana[6] + 'T00:00:00'), 'dd/MM')})</h3>
-        <div className="overflow-x-auto">
+        <p className="text-[11px] text-gray-400 mb-1 sm:hidden">Arraste a tabela para o lado para ver todos os dias →</p>
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
           <table className="min-w-full text-xs divide-y divide-gray-200">
             <thead>
               <tr>
-                <th className="px-3 py-2 text-left font-medium text-gray-500">Função</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-500 sticky left-0 bg-white">Função</th>
                 {diasDaSemana.map((d) => (
-                  <th key={d} className="px-3 py-2 text-center font-medium text-gray-500">
+                  <th key={d} className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">
                     {format(new Date(d + 'T00:00:00'), 'EEE dd/MM', { locale: ptBR })}
                   </th>
                 ))}
@@ -223,11 +225,11 @@ function VisaoUbm({ ubmId, nomeUbm, comandoOrigemId }: { ubmId: string; nomeUbm:
             <tbody className="divide-y divide-gray-100">
               {funcoesDaUbm.map((f) => (
                 <tr key={f.id}>
-                  <td className="px-3 py-2 font-medium text-gray-800">{f.nome}</td>
+                  <td className="px-3 py-2 font-medium text-gray-800 sticky left-0 bg-white whitespace-nowrap">{f.nome}</td>
                   {diasDaSemana.map((d) => {
                     const escalado = escalasOrdinarias.find((e) => e.ubmId === ubmId && e.funcao === f.id && e.data === d);
                     const militar = escalado ? militares.find((m) => m.id === escalado.militarId) : undefined;
-                    return <td key={d} className="px-3 py-2 text-center text-gray-600">{militar?.nome ?? '—'}</td>;
+                    return <td key={d} className="px-3 py-2 text-center text-gray-600 whitespace-nowrap">{militar?.nome ?? '—'}</td>;
                   })}
                 </tr>
               ))}
@@ -251,30 +253,19 @@ function VisaoUbm({ ubmId, nomeUbm, comandoOrigemId }: { ubmId: string; nomeUbm:
         </div>
 
         <h4 className="text-xs font-semibold text-gray-500 uppercase mt-4 mb-2">Média de folgas por cargo e função (dias no período)</h4>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-xs divide-y divide-gray-200">
-            <thead>
-              <tr>
-                <th className="px-3 py-2 text-left font-medium text-gray-500">Cargo</th>
-                <th className="px-3 py-2 text-left font-medium text-gray-500">Função</th>
-                <th className="px-3 py-2 text-center font-medium text-gray-500">Militares</th>
-                <th className="px-3 py-2 text-center font-medium text-gray-500">Média de folgas</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {mediaFolgas.map((l) => (
-                <tr key={`${l.cargo}-${l.funcaoId}`}>
-                  <td className="px-3 py-2 text-gray-800">{l.cargo}</td>
-                  <td className="px-3 py-2 text-gray-600">{l.funcaoNome}</td>
-                  <td className="px-3 py-2 text-center text-gray-600">{l.militares}</td>
-                  <td className="px-3 py-2 text-center font-medium text-gray-800">{l.mediaFolgas}</td>
-                </tr>
-              ))}
-              {mediaFolgas.length === 0 && (
-                <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-400">Sem dados nesse período.</td></tr>
-              )}
-            </tbody>
-          </table>
+        <div className="divide-y divide-gray-100 border border-gray-100 rounded-md">
+          {mediaFolgas.length === 0 ? (
+            <p className="px-3 py-6 text-center text-gray-400 text-xs">Sem dados nesse período.</p>
+          ) : (
+            mediaFolgas.map((l) => (
+              <div key={`${l.cargo}-${l.funcaoId}`} className="flex flex-col sm:flex-row sm:items-center gap-1 px-3 py-2 text-xs">
+                <div className="min-w-0 flex-1">
+                  <span className="text-gray-800 font-medium">{l.cargo}</span> <span className="text-gray-500">— {l.funcaoNome}</span>
+                </div>
+                <div className="shrink-0 text-gray-600">{l.militares} militar(es) · média {l.mediaFolgas} folgas</div>
+              </div>
+            ))
+          )}
         </div>
 
         <h4 className="text-xs font-semibold text-gray-500 uppercase mt-6 mb-2">Volume de trabalho por cargo (serviços no período)</h4>

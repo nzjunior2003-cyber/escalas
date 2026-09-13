@@ -206,38 +206,22 @@ export default function Historico() {
         })}
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Tipo</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Semana</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Versão</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Fechada por</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Em</th>
-              <th className="relative px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {historicoDaUbm.map((h) => (
-              <tr key={h.id}>
-                <td className="px-4 py-2 capitalize">{h.tipo}</td>
-                <td className="px-4 py-2">{h.semanaInicio}</td>
-                <td className="px-4 py-2">v{h.versao}</td>
-                <td className="px-4 py-2">{nomeUsuario(h.fechadoPorId)}</td>
-                <td className="px-4 py-2">{new Date(h.fechado_em).toLocaleString('pt-BR')}</td>
-                <td className="px-4 py-2 text-right">
-                  <button onClick={() => baixarPdfDoHistorico(h)} className="text-xs text-red-600 hover:text-red-800 font-medium">
-                    Baixar PDF
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {historicoDaUbm.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Nenhuma escala fechada ainda.</td></tr>
-            )}
-          </tbody>
-        </table>
+      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+        {historicoDaUbm.length === 0 ? (
+          <p className="px-4 py-8 text-center text-gray-400">Nenhuma escala fechada ainda.</p>
+        ) : (
+          historicoDaUbm.map((h) => (
+            <div key={h.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-gray-900 capitalize">{h.tipo} — Semana {h.semanaInicio} · v{h.versao}</div>
+                <div className="text-gray-500">Fechada por {nomeUsuario(h.fechadoPorId)} em {new Date(h.fechado_em).toLocaleString('pt-BR')}</div>
+              </div>
+              <button onClick={() => baixarPdfDoHistorico(h)} className="shrink-0 self-end sm:self-auto text-xs text-red-600 hover:text-red-800 font-medium p-2 -m-2">
+                Baixar PDF
+              </button>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

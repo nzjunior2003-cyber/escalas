@@ -126,32 +126,19 @@ function PainelComando() {
         </button>
       </form>
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">UBM</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Função</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Data</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Status</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Militar empenhado</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {minhasSolicitacoes.map((s) => (
-              <tr key={s.id}>
-                <td className="px-4 py-2">{nomeUbm(s.ubmId)}</td>
-                <td className="px-4 py-2">{nomeFuncao(s.funcao)}</td>
-                <td className="px-4 py-2">{s.data}</td>
-                <td className="px-4 py-2">{STATUS_SOLICITACAO_REFORCO_LABELS[s.status]}</td>
-                <td className="px-4 py-2">{s.status === 'atendida' ? nomeMilitar(s.militarId) : '—'}</td>
-              </tr>
-            ))}
-            {minhasSolicitacoes.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Nenhuma solicitação feita ainda.</td></tr>
-            )}
-          </tbody>
-        </table>
+      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+        {minhasSolicitacoes.length === 0 ? (
+          <p className="px-4 py-8 text-center text-gray-400">Nenhuma solicitação feita ainda.</p>
+        ) : (
+          minhasSolicitacoes.map((s) => (
+            <div key={s.id} className="flex flex-col sm:flex-row sm:items-center gap-1 px-4 py-3 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-gray-900">{nomeUbm(s.ubmId)} — {nomeFuncao(s.funcao)}</div>
+                <div className="text-gray-500">{s.data} · {STATUS_SOLICITACAO_REFORCO_LABELS[s.status]}{s.status === 'atendida' ? ` · ${nomeMilitar(s.militarId)}` : ''}</div>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -262,29 +249,15 @@ function PainelUbm() {
       )}
 
       {historico.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-2 text-left font-medium text-gray-500">Comando</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-500">Função</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-500">Data</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-500">Status</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-500">Militar</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {historico.map((s) => (
-                <tr key={s.id}>
-                  <td className="px-4 py-2">{nomeComando(s.comandoId)}</td>
-                  <td className="px-4 py-2">{nomeFuncao(s.funcao)}</td>
-                  <td className="px-4 py-2">{s.data}</td>
-                  <td className="px-4 py-2">{STATUS_SOLICITACAO_REFORCO_LABELS[s.status]}</td>
-                  <td className="px-4 py-2">{nomeMilitar(s.militarId)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+          {historico.map((s) => (
+            <div key={s.id} className="flex flex-col sm:flex-row sm:items-center gap-1 px-4 py-3 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-gray-900">{nomeComando(s.comandoId)} — {nomeFuncao(s.funcao)}</div>
+                <div className="text-gray-500">{s.data} · {STATUS_SOLICITACAO_REFORCO_LABELS[s.status]} · {nomeMilitar(s.militarId)}</div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

@@ -140,62 +140,44 @@ export default function Efetivo() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Militar</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Funções</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="relative px-6 py-3"><span className="sr-only">Ações</span></th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filtrados.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-10 text-center text-gray-500">Nenhum militar encontrado.</td>
-                </tr>
-              ) : (
-                filtrados.map((m) => (
-                  <tr key={m.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{m.posto} {m.nome}</div>
-                      <div className="text-sm text-gray-500">Matr. {m.matricula || '—'}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-wrap gap-1">
-                        {m.funcoes.length === 0 ? (
-                          <span className="text-xs text-gray-400">Nenhuma função atribuída</span>
-                        ) : (
-                          m.funcoes.map((f) => (
-                            <span key={f} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700">
-                              {nomeDaFuncao(f)}
-                            </span>
-                          ))
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${m.ativo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                        {m.ativo ? 'Ativo' : 'Inativo'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
-                      <button onClick={() => setMilitarEditando(m)} className="text-red-600 hover:text-red-900" title="Editar funções">
-                        <Edit2 className="w-4 h-4 inline" />
-                      </button>
-                      <button onClick={() => setTransferindo(m)} className="text-gray-500 hover:text-gray-800" title="Transferir de UBM">
-                        <ArrowLeftRight className="w-4 h-4 inline" />
-                      </button>
-                      <button onClick={() => deleteMilitar(m.id)} className="text-gray-400 hover:text-red-600" title="Excluir">
-                        <Trash2 className="w-4 h-4 inline" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="divide-y divide-gray-200">
+          {filtrados.length === 0 ? (
+            <p className="px-6 py-10 text-center text-gray-500">Nenhum militar encontrado.</p>
+          ) : (
+            filtrados.map((m) => (
+              <div key={m.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 sm:px-6 py-3 hover:bg-gray-50">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-gray-900">{m.posto} {m.nome}</div>
+                  <div className="text-sm text-gray-500">Matr. {m.matricula || '—'}</div>
+                  <div className="flex flex-wrap gap-1 mt-1.5 items-center">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${m.ativo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      {m.ativo ? 'Ativo' : 'Inativo'}
+                    </span>
+                    {m.funcoes.length === 0 ? (
+                      <span className="text-xs text-gray-400">Nenhuma função atribuída</span>
+                    ) : (
+                      m.funcoes.map((f) => (
+                        <span key={f} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700">
+                          {nomeDaFuncao(f)}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto text-sm font-medium">
+                  <button onClick={() => setMilitarEditando(m)} className="p-2 -m-2 text-red-600 hover:text-red-900" title="Editar funções">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setTransferindo(m)} className="p-2 -m-2 text-gray-500 hover:text-gray-800" title="Transferir de UBM">
+                    <ArrowLeftRight className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => deleteMilitar(m.id)} className="p-2 -m-2 text-gray-400 hover:text-red-600" title="Excluir">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
