@@ -1,26 +1,30 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { startOfWeek, addDays } from 'date-fns';
 import { Download } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { formatarDataISO } from '../../lib/escala';
 import { gerarPdfEscala } from '../../lib/pdfEscala';
-import { FUNCAO_LABELS, FuncaoOperacional, temPapel } from '../../types';
-
-const TODAS_FUNCOES = Object.keys(FUNCAO_LABELS) as FuncaoOperacional[];
+import { temPapel } from '../../types';
 
 export default function Relatorios() {
-  const { usuarioAtual, ubms, militares, escalasOrdinarias, escalasExtraordinarias } = useApp();
+  const { usuarioAtual, ubms, militares, funcoes, escalasOrdinarias, escalasExtraordinarias } = useApp();
 
-  const [funcao, setFuncao] = useState<FuncaoOperacional>('guarnicao');
+  const ubmId = usuarioAtual?.ubmId ?? '';
+  const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
+
+  const [funcao, setFuncao] = useState<string>('');
   const [semana, setSemana] = useState(formatarDataISO(startOfWeek(new Date(), { weekStartsOn: 1 })));
   const [gerando, setGerando] = useState<'ordinaria' | 'extraordinaria' | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!funcao && funcoesDaUbm.length > 0) setFuncao(funcoesDaUbm[0].id);
+  }, [funcao, funcoesDaUbm]);
 
   if (!temPapel(usuarioAtual, 'comandante') && !temPapel(usuarioAtual, 'escalante')) {
     return <div className="p-8 text-center text-gray-500">Você não tem permissão para acessar este módulo.</div>;
   }
 
-  const ubmId = usuarioAtual!.ubmId;
   const ubm = ubms.find((u) => u.id === ubmId);
 
   const baixarPdf = async (tipo: 'ordinaria' | 'extraordinaria') => {
@@ -42,7 +46,7 @@ export default function Relatorios() {
 
       await gerarPdfEscala({
         tipo,
-        funcao,
+        funcaoNome: funcoes.find((f) => f.id === funcao)?.nome ?? 'Função removida',
         ubmNome: ubm ? `${ubm.sigla} - ${ubm.nome}` : 'Unidade de Bombeiro Militar',
         ubmLogoDataUrl: ubm?.logoDataUrl,
         semanaInicio: semana,
@@ -66,8 +70,9 @@ export default function Relatorios() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
-            <select value={funcao} onChange={(e) => setFuncao(e.target.value as FuncaoOperacional)} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3">
-              {TODAS_FUNCOES.map((f) => <option key={f} value={f}>{FUNCAO_LABELS[f]}</option>)}
+            <select value={funcao} onChange={(e) => setFuncao(e.target.value)} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3">
+              {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+              {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
           <div>

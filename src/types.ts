@@ -64,16 +64,30 @@ export interface Ubm {
 
 // ---------------------------------------------------------------------------
 // Efetivo / Militar
+//
+// Cada UBM cadastra suas próprias funções operacionais (coleção `funcoes`,
+// gerenciada pelo escalante/comandante da UBM) — não existe mais uma lista
+// fixa de funções válida pra todo o CBMPA, porque cada unidade tem suas
+// peculiaridades. `Militar.funcoes` e `funcao` em `EscalaOrdinaria`/
+// `EscalaExtraordinaria` guardam o id do documento em `funcoes`, não mais uma
+// chave fixa. `FUNCOES_PADRAO` só é usado como semente ao criar uma UBM nova
+// (e para migrar as UBMs que já existiam antes desta mudança).
 // ---------------------------------------------------------------------------
-export type FuncaoOperacional = 'condutor' | 'cmt_sos' | 'socorrista' | 'guarnicao' | 'outro';
+export const FUNCOES_PADRAO: string[] = [
+  'Condutor',
+  'Comandante de Socorro (CMT de SOS)',
+  'Socorrista',
+  'Componente de Guarnição',
+  'Outro',
+];
 
-export const FUNCAO_LABELS: Record<FuncaoOperacional, string> = {
-  condutor: 'Condutor',
-  cmt_sos: 'Comandante de Socorro (CMT de SOS)',
-  socorrista: 'Socorrista',
-  guarnicao: 'Componente de Guarnição',
-  outro: 'Outro',
-};
+export interface FuncaoUbm {
+  id: string;
+  ubmId: string;
+  nome: string;
+  ativa: boolean;
+  criado_em: string;
+}
 
 /** Uma UBM anterior no histórico do militar — suporta transferência entre UBMs. */
 export interface VinculoUbm {
@@ -90,9 +104,8 @@ export interface Militar {
   /** UBM atual (vínculo em aberto no histórico). */
   ubmId: string;
   historicoUbm: VinculoUbm[];
-  /** Um militar pode acumular mais de uma função (ex.: Condutor e Socorrista). */
-  funcoes: FuncaoOperacional[];
-  funcaoOutraDescricao?: string;
+  /** Ids de `FuncaoUbm` — um militar pode acumular mais de uma função. */
+  funcoes: string[];
   ativo: boolean;
   origemCadastro: 'planilha' | 'manual';
   criado_em: string;
@@ -105,7 +118,8 @@ export interface Militar {
 export interface EscalaOrdinaria {
   id: string;
   ubmId: string;
-  funcao: FuncaoOperacional;
+  /** Id de `FuncaoUbm`. */
+  funcao: string;
   data: string; // yyyy-MM-dd
   militarId: string;
   origem: 'gerada' | 'manual';
@@ -118,7 +132,8 @@ export interface EscalaOrdinaria {
 export interface EscalaExtraordinaria {
   id: string;
   ubmId: string;
-  funcao: FuncaoOperacional;
+  /** Id de `FuncaoUbm`. */
+  funcao: string;
   data: string;
   motivo: string;
   /** Militar apontado pelo algoritmo de rodízio (nunca sobrescrito). */

@@ -49,7 +49,8 @@ import {
   EscalaDiferenciada,
   EscalaExtraordinaria,
   EscalaOrdinaria,
-  FuncaoOperacional,
+  FUNCOES_PADRAO,
+  FuncaoUbm,
   Militar,
   RegistroPresenca,
   SolicitacaoAlteracaoDiferenciada,
@@ -65,6 +66,7 @@ interface AppContextData {
   ubms: Ubm[];
   usuarios: Usuario[];
   militares: Militar[];
+  funcoes: FuncaoUbm[];
   escalasOrdinarias: EscalaOrdinaria[];
   escalasExtraordinarias: EscalaExtraordinaria[];
   escalasDiferenciadas: EscalaDiferenciada[];
@@ -110,11 +112,16 @@ interface AppContextData {
   transferirMilitarDeUbm: (militarId: string, novaUbmId: string) => Promise<void>;
   deleteMilitar: (id: string) => Promise<void>;
 
-  gerarEPersistirEscalaOrdinaria: (params: { ubmId: string; funcao: FuncaoOperacional; dataInicio: string; dataFim: string }) => Promise<number>;
+  /** Cadastro de funções operacionais da própria UBM (escalante/comandante). */
+  addFuncao: (dados: { ubmId: string; nome: string }) => Promise<string>;
+  updateFuncao: (id: string, dados: Partial<Pick<FuncaoUbm, 'nome' | 'ativa'>>) => Promise<void>;
+  deleteFuncao: (id: string) => Promise<void>;
+
+  gerarEPersistirEscalaOrdinaria: (params: { ubmId: string; funcao: string; dataInicio: string; dataFim: string }) => Promise<number>;
   updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
   deleteEscalaOrdinaria: (id: string) => Promise<void>;
 
-  criarEscalaExtraordinaria: (dados: { ubmId: string; funcao: FuncaoOperacional; data: string; motivo: string; militarIdEscolhido?: string }) => Promise<string>;
+  criarEscalaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; militarIdEscolhido?: string }) => Promise<string>;
   alterarMilitarExtraordinaria: (id: string, militarId: string) => Promise<void>;
 
   solicitarEscalaDiferenciada: (dados: { militarId: string; ubmId: string; data: string; observacao?: string }) => Promise<void>;
@@ -251,6 +258,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const ubms = useColecao<Ubm>('ubms', isFirebaseConfigured);
   const usuarios = useColecao<Usuario>('usuarios', isAuthenticated);
   const militares = useColecao<Militar>('militares', isAuthenticated);
+  const funcoes = useColecao<FuncaoUbm>('funcoes', isAuthenticated);
   const escalasOrdinarias = useColecao<EscalaOrdinaria>('escalas_ordinarias', isAuthenticated);
   const escalasExtraordinarias = useColecao<EscalaExtraordinaria>('escalas_extraordinarias', isAuthenticated);
   const escalasDiferenciadas = useColecao<EscalaDiferenciada>('escalas_diferenciadas', isAuthenticated);
@@ -494,12 +502,44 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const addUbm = useCallback(async (dados: Omit<Ubm, 'id'>) => {
     const db = requireDb();
     const ref = await addDoc(collection(db, 'ubms'), semIndefinidosParaCriar(dados));
+    // Toda UBM nova já nasce com as funções padrão cadastradas — o
+    // escalante edita os nomes, cria outras ou inativa o que não servir
+    // pra unidade dele a partir daí (ver nota em `FUNCOES_PADRAO`).
+    const agora = new Date().toISOString();
+    const lote = writeBatch(db);
+    FUNCOES_PADRAO.forEach((nome) => {
+      const funcaoRef = doc(collection(db, 'funcoes'));
+      lote.set(funcaoRef, { ubmId: ref.id, nome, ativa: true, criado_em: agora });
+    });
+    await lote.commit();
     return ref.id;
   }, []);
 
   const updateUbm = useCallback(async (id: string, dados: Partial<Ubm>) => {
     const db = requireDb();
     await updateDoc(doc(db, 'ubms', id), semIndefinidosParaAtualizar(dados));
+  }, []);
+
+  // --- Funções operacionais (cadastro por UBM) ------------------------------
+  const addFuncao = useCallback(async (dados: { ubmId: string; nome: string }) => {
+    const db = requireDb();
+    const ref = await addDoc(collection(db, 'funcoes'), {
+      ubmId: dados.ubmId,
+      nome: dados.nome,
+      ativa: true,
+      criado_em: new Date().toISOString(),
+    });
+    return ref.id;
+  }, []);
+
+  const updateFuncao = useCallback(async (id: string, dados: Partial<Pick<FuncaoUbm, 'nome' | 'ativa'>>) => {
+    const db = requireDb();
+    await updateDoc(doc(db, 'funcoes', id), semIndefinidosParaAtualizar(dados));
+  }, []);
+
+  const deleteFuncao = useCallback(async (id: string) => {
+    const db = requireDb();
+    await deleteDoc(doc(db, 'funcoes', id));
   }, []);
 
   // --- Usuários (aprovação de cadastro, perfis) -----------------------------
@@ -623,7 +663,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   // --- Escala ordinária ------------------------------------------------
   const gerarEPersistirEscalaOrdinaria = useCallback(
-    async (params: { ubmId: string; funcao: FuncaoOperacional; dataInicio: string; dataFim: string }) => {
+    async (params: { ubmId: string; funcao: string; dataInicio: string; dataFim: string }) => {
       const db = requireDb();
       const geradas = gerarEscalaOrdinaria({
         ...params,
@@ -659,7 +699,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   // --- Escala extraordinária ---------------------------------------------
   const criarEscalaExtraordinaria = useCallback(
-    async (dados: { ubmId: string; funcao: FuncaoOperacional; data: string; motivo: string; militarIdEscolhido?: string }) => {
+    async (dados: { ubmId: string; funcao: string; data: string; motivo: string; militarIdEscolhido?: string }) => {
       const db = requireDb();
       const sugerido = sugerirMilitarExtraordinario({
         ubmId: dados.ubmId,
@@ -931,6 +971,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       ubms,
       usuarios,
       militares,
+      funcoes,
       escalasOrdinarias,
       escalasExtraordinarias,
       escalasDiferenciadas,
@@ -959,6 +1000,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       updateMilitar,
       transferirMilitarDeUbm,
       deleteMilitar,
+      addFuncao,
+      updateFuncao,
+      deleteFuncao,
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
       deleteEscalaOrdinaria,
@@ -980,6 +1024,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       ubms,
       usuarios,
       militares,
+      funcoes,
       escalasOrdinarias,
       escalasExtraordinarias,
       escalasDiferenciadas,
@@ -1007,6 +1052,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       updateMilitar,
       transferirMilitarDeUbm,
       deleteMilitar,
+      addFuncao,
+      updateFuncao,
+      deleteFuncao,
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
       deleteEscalaOrdinaria,

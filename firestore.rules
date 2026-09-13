@@ -114,6 +114,13 @@ service cloud.firestore {
       allow create: if podeGerenciarUbm(request.resource.data.ubmId);
       allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
+    // Funções operacionais cadastradas por UBM (ver nota em types.ts) —
+    // cada Comandante/Escalante só cria/edita/apaga as da própria unidade.
+    match /funcoes/{documento} {
+      allow read: if ativo();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
+    }
     match /escalas_ordinarias/{documento} {
       allow read: if ativo();
       allow create: if podeGerenciarUbm(request.resource.data.ubmId);

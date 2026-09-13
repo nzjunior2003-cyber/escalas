@@ -1,13 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarDays, Plus, Sparkles } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { formatarDataISO } from '../../lib/escala';
-import { FUNCAO_LABELS, FuncaoOperacional, temPapel } from '../../types';
+import { temPapel } from '../../types';
 
-const TODAS_FUNCOES = Object.keys(FUNCAO_LABELS) as FuncaoOperacional[];
 type Aba = 'ordinaria' | 'extraordinaria' | 'diferenciada';
 type Granularidade = 'semanal' | 'mensal' | 'anual';
 
@@ -28,15 +27,21 @@ function intervaloPorGranularidade(granularidade: Granularidade, base: Date): { 
 }
 
 export default function Escala() {
-  const { usuarioAtual, militares, escalasOrdinarias, gerarEPersistirEscalaOrdinaria, updateEscalaOrdinaria } = useApp();
+  const { usuarioAtual, militares, funcoes, escalasOrdinarias, gerarEPersistirEscalaOrdinaria, updateEscalaOrdinaria } = useApp();
   const [aba, setAba] = useState<Aba>('ordinaria');
   const [granularidade, setGranularidade] = useState<Granularidade>('semanal');
-  const [funcaoSelecionada, setFuncaoSelecionada] = useState<FuncaoOperacional>('guarnicao');
+  const [funcaoSelecionada, setFuncaoSelecionada] = useState<string>('');
   const [gerando, setGerando] = useState(false);
 
   const ubmId = usuarioAtual?.ubmId ?? '';
   const isEscalante = temPapel(usuarioAtual, 'escalante');
   const { inicio, fim, dias } = useMemo(() => intervaloPorGranularidade(granularidade, new Date()), [granularidade]);
+
+  const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
+  useEffect(() => {
+    if (!funcaoSelecionada && funcoesDaUbm.length > 0) setFuncaoSelecionada(funcoesDaUbm[0].id);
+  }, [funcaoSelecionada, funcoesDaUbm]);
+  const nomeDaFuncaoSelecionada = funcoes.find((f) => f.id === funcaoSelecionada)?.nome ?? '';
 
   const militaresDaFuncaoNaUbm = militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(funcaoSelecionada));
 
@@ -44,7 +49,7 @@ export default function Escala() {
     setGerando(true);
     try {
       const total = await gerarEPersistirEscalaOrdinaria({ ubmId, funcao: funcaoSelecionada, dataInicio: inicio, dataFim: fim });
-      alert(`Previsão gerada: ${total} dias de escala para ${FUNCAO_LABELS[funcaoSelecionada]}.`);
+      alert(`Previsão gerada: ${total} dias de escala para ${nomeDaFuncaoSelecionada}.`);
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível gerar a escala.');
     } finally {
@@ -78,9 +83,10 @@ export default function Escala() {
       {aba === 'ordinaria' && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-3 bg-white p-4 rounded-lg border border-gray-200">
-            <select value={funcaoSelecionada} onChange={(e) => setFuncaoSelecionada(e.target.value as FuncaoOperacional)} className="border border-gray-300 rounded-md text-sm py-2 px-3">
-              {TODAS_FUNCOES.map((f) => (
-                <option key={f} value={f}>{FUNCAO_LABELS[f]}</option>
+            <select value={funcaoSelecionada} onChange={(e) => setFuncaoSelecionada(e.target.value)} className="border border-gray-300 rounded-md text-sm py-2 px-3">
+              {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+              {funcoesDaUbm.map((f) => (
+                <option key={f.id} value={f.id}>{f.nome}</option>
               ))}
             </select>
             <div className="flex gap-1">
@@ -105,11 +111,15 @@ export default function Escala() {
             )}
           </div>
 
-          {militaresDaFuncaoNaUbm.length === 0 && (
+          {funcoesDaUbm.length === 0 ? (
             <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
-              Nenhum militar ativo com a função "{FUNCAO_LABELS[funcaoSelecionada]}" nesta UBM. Atribua a função no módulo Efetivo.
+              Nenhuma função cadastrada nesta UBM ainda. Cadastre em "Funções" antes de gerar a escala.
             </p>
-          )}
+          ) : militaresDaFuncaoNaUbm.length === 0 ? (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
+              Nenhum militar ativo com a função "{nomeDaFuncaoSelecionada}" nesta UBM. Atribua a função no módulo Efetivo.
+            </p>
+          ) : null}
 
           {granularidade === 'semanal' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
@@ -183,18 +193,24 @@ export default function Escala() {
 }
 
 function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante: boolean }) {
-  const { militares, escalasExtraordinarias, criarEscalaExtraordinaria, alterarMilitarExtraordinaria } = useApp();
-  const [form, setForm] = useState({ funcao: 'guarnicao' as FuncaoOperacional, data: formatarDataISO(new Date()), motivo: '' });
+  const { militares, funcoes, escalasExtraordinarias, criarEscalaExtraordinaria, alterarMilitarExtraordinaria } = useApp();
+  const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
+  const [form, setForm] = useState({ funcao: '', data: formatarDataISO(new Date()), motivo: '' });
   const [criando, setCriando] = useState(false);
 
+  useEffect(() => {
+    if (!form.funcao && funcoesDaUbm.length > 0) setForm((f) => ({ ...f, funcao: funcoesDaUbm[0].id }));
+  }, [form.funcao, funcoesDaUbm]);
+
   const doUbm = escalasExtraordinarias.filter((e) => e.ubmId === ubmId).sort((a, b) => b.data.localeCompare(a.data));
+  const nomeDaFuncao = (funcaoId: string) => funcoes.find((f) => f.id === funcaoId)?.nome ?? 'Função removida';
 
   const handleCriar = async (e: FormEvent) => {
     e.preventDefault();
     setCriando(true);
     try {
       await criarEscalaExtraordinaria({ ubmId, ...form });
-      setForm({ funcao: 'guarnicao', data: formatarDataISO(new Date()), motivo: '' });
+      setForm({ funcao: funcoesDaUbm[0]?.id ?? '', data: formatarDataISO(new Date()), motivo: '' });
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível criar a escala extraordinária.');
     } finally {
@@ -208,8 +224,9 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
         <form onSubmit={handleCriar} className="bg-white p-4 rounded-lg border border-gray-200 flex flex-wrap gap-3 items-end">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
-            <select value={form.funcao} onChange={(e) => setForm({ ...form, funcao: e.target.value as FuncaoOperacional })} className="border border-gray-300 rounded-md text-sm py-2 px-3">
-              {TODAS_FUNCOES.map((f) => <option key={f} value={f}>{FUNCAO_LABELS[f]}</option>)}
+            <select value={form.funcao} onChange={(e) => setForm({ ...form, funcao: e.target.value })} className="border border-gray-300 rounded-md text-sm py-2 px-3">
+              {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+              {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
           <div>
@@ -244,7 +261,7 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
               return (
                 <tr key={e.id}>
                   <td className="px-4 py-2">{e.data}</td>
-                  <td className="px-4 py-2">{FUNCAO_LABELS[e.funcao]}</td>
+                  <td className="px-4 py-2">{nomeDaFuncao(e.funcao)}</td>
                   <td className="px-4 py-2">{e.motivo}</td>
                   <td className="px-4 py-2 text-gray-500">{sugerido?.nome ?? '—'}</td>
                   <td className="px-4 py-2">

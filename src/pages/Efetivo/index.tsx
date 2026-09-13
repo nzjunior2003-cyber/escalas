@@ -5,12 +5,10 @@ import { useApp } from '../../context/AppContext';
 import { buscarEfetivoDaPlanilha } from '../../lib/planilhaEfetivo';
 import type { LinhaMilitar } from '../../lib/csvMilitares';
 import MilitarPlanilhaAutocomplete from '../../components/MilitarPlanilhaAutocomplete';
-import { FUNCAO_LABELS, FuncaoOperacional, Militar, temPapel } from '../../types';
-
-const TODAS_FUNCOES = Object.keys(FUNCAO_LABELS) as FuncaoOperacional[];
+import { Militar, temPapel } from '../../types';
 
 export default function Efetivo() {
-  const { usuarioAtual, militares, ubms, addMilitar, updateMilitar, deleteMilitar, transferirMilitarDeUbm } = useApp();
+  const { usuarioAtual, militares, ubms, funcoes, addMilitar, updateMilitar, deleteMilitar, transferirMilitarDeUbm } = useApp();
 
   const [busca, setBusca] = useState('');
   const [militarEditando, setMilitarEditando] = useState<Militar | null>(null);
@@ -32,6 +30,8 @@ export default function Efetivo() {
 
   const ubmId = usuarioAtual!.ubmId;
   const militaresDaUbm = militares.filter((m) => m.ubmId === ubmId);
+  const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
+  const nomeDaFuncao = (funcaoId: string) => funcoes.find((f) => f.id === funcaoId)?.nome ?? 'Função removida';
   const filtrados = militaresDaUbm.filter(
     (m) => m.nome.toLowerCase().includes(busca.toLowerCase()) || m.matricula.toLowerCase().includes(busca.toLowerCase()),
   );
@@ -87,7 +87,7 @@ export default function Efetivo() {
     setIsNovoOpen(false);
   };
 
-  const alternarFuncao = (militar: Militar, funcao: FuncaoOperacional) => {
+  const alternarFuncao = (militar: Militar, funcao: string) => {
     const jaTem = militar.funcoes.includes(funcao);
     const novasFuncoes = jaTem ? militar.funcoes.filter((f) => f !== funcao) : [...militar.funcoes, funcao];
     updateMilitar(militar.id, { funcoes: novasFuncoes });
@@ -169,7 +169,7 @@ export default function Efetivo() {
                         ) : (
                           m.funcoes.map((f) => (
                             <span key={f} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700">
-                              {FUNCAO_LABELS[f]}
+                              {nomeDaFuncao(f)}
                             </span>
                           ))
                         )}
@@ -208,12 +208,18 @@ export default function Efetivo() {
             <h3 className="text-lg font-medium text-gray-900 mb-1">{militarEditando.posto} {militarEditando.nome}</h3>
             <p className="text-sm text-gray-500 mb-4">Funções operacionais (um militar pode acumular mais de uma)</p>
             <div className="space-y-2">
-              {TODAS_FUNCOES.map((f) => (
-                <label key={f} className="flex items-center gap-2 text-sm text-gray-800">
-                  <input type="checkbox" checked={militarEditando.funcoes.includes(f)} onChange={() => alternarFuncao(militarEditando, f)} className="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded" />
-                  {FUNCAO_LABELS[f]}
-                </label>
-              ))}
+              {funcoesDaUbm.length === 0 ? (
+                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
+                  Nenhuma função cadastrada nesta UBM ainda. Cadastre em "Funções".
+                </p>
+              ) : (
+                funcoesDaUbm.map((f) => (
+                  <label key={f.id} className="flex items-center gap-2 text-sm text-gray-800">
+                    <input type="checkbox" checked={militarEditando.funcoes.includes(f.id)} onChange={() => alternarFuncao(militarEditando, f.id)} className="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded" />
+                    {f.nome}
+                  </label>
+                ))
+              )}
             </div>
           </div>
         </div>

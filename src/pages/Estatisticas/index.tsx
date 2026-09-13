@@ -7,6 +7,7 @@ export default function Estatisticas() {
   const {
     usuarioAtual,
     militares,
+    funcoes,
     escalasOrdinarias,
     escalasExtraordinarias,
     presencas,
@@ -54,7 +55,7 @@ export default function Estatisticas() {
 
   const folgasPorFuncao = militaresDaUbm.flatMap((m) =>
     m.funcoes.map((f) => ({
-      nome: `${m.nome} (${f})`,
+      nome: `${m.nome} (${funcoes.find((funcaoUbm) => funcaoUbm.id === f)?.nome ?? 'Função removida'})`,
       folgas: calcularDiasFolga(m.id, f, inicioAno, hoje, escalasOrdinarias.filter((e) => e.ubmId === ubmId)),
     })),
   );

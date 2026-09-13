@@ -49,7 +49,6 @@ import {
   type Afastamento,
   type EscalaExtraordinaria,
   type EscalaOrdinaria,
-  type FuncaoOperacional,
   type Militar,
 } from '../types';
 
@@ -59,7 +58,7 @@ export function formatarDataISO(data: Date): string {
   return format(data, FORMATO_DATA);
 }
 
-export function militaresDaFuncao(militares: Militar[], ubmId: string, funcao: FuncaoOperacional): Militar[] {
+export function militaresDaFuncao(militares: Militar[], ubmId: string, funcao: string): Militar[] {
   return militares
     .filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(funcao))
     .sort((a, b) => a.nome.localeCompare(b.nome));
@@ -98,7 +97,7 @@ export function diasIsentosAteData(militarId: string, ateData: string, afastamen
  */
 export function gerarEscalaOrdinaria(params: {
   ubmId: string;
-  funcao: FuncaoOperacional;
+  funcao: string;
   militares: Militar[];
   afastamentos: Afastamento[];
   escalasOrdinariasExistentes: EscalaOrdinaria[];
@@ -170,7 +169,7 @@ export function gerarEscalaOrdinaria(params: {
 /** Dias de folga acumulados por militar dentro de uma função, no período informado. */
 export function calcularDiasFolga(
   militarId: string,
-  funcao: FuncaoOperacional,
+  funcao: string,
   periodoInicio: string,
   periodoFim: string,
   escalasOrdinarias: EscalaOrdinaria[],
@@ -190,7 +189,7 @@ export function calcularDiasFolga(
  */
 export function sugerirMilitarExtraordinario(params: {
   ubmId: string;
-  funcao: FuncaoOperacional;
+  funcao: string;
   data: string;
   militares: Militar[];
   afastamentos: Afastamento[];

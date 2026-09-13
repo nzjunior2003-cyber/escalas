@@ -6,6 +6,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import PublicHome from './pages/PublicHome';
 import SistemaHome from './pages/SistemaHome';
 import Efetivo from './pages/Efetivo';
+import Funcoes from './pages/Funcoes';
 import Escala from './pages/Escala';
 import Solicitacoes from './pages/Solicitacoes';
 import Afastamentos from './pages/Afastamentos';
@@ -29,6 +30,7 @@ export default function App() {
               <Route element={<Layout />}>
                 <Route index element={<SistemaHome />} />
                 <Route path="efetivo" element={<Efetivo />} />
+                <Route path="funcoes" element={<Funcoes />} />
                 <Route path="escala" element={<Escala />} />
                 <Route path="solicitacoes" element={<Solicitacoes />} />
                 <Route path="afastamentos" element={<Afastamentos />} />

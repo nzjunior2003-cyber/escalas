@@ -12,6 +12,7 @@ import {
   Building2,
   Menu,
   FileSignature,
+  ListChecks,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useApp } from '../../context/AppContext';
@@ -39,6 +40,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
   const navigation = [
     { name: 'Início', href: '/sistema', icon: Home, show: true },
     { name: 'Efetivo', href: '/sistema/efetivo', icon: Users, show: isGestao },
+    { name: 'Funções', href: '/sistema/funcoes', icon: ListChecks, show: isGestao },
     { name: 'Escala', href: '/sistema/escala', icon: CalendarDays, show: temUbm },
     { name: 'Solicitações', href: '/sistema/solicitacoes', icon: Send, show: temUbm },
     { name: 'Afastamentos', href: '/sistema/afastamentos', icon: UserX, show: isGestao },

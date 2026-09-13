@@ -9,7 +9,6 @@ import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { carregarImagemPublicaComoDataUrl } from './imagem';
-import { FUNCAO_LABELS, type FuncaoOperacional } from '../types';
 
 export interface LinhaRelatorioEscala {
   data: string; // yyyy-MM-dd
@@ -19,7 +18,8 @@ export interface LinhaRelatorioEscala {
 
 export interface DadosRelatorioEscala {
   tipo: 'ordinaria' | 'extraordinaria';
-  funcao: FuncaoOperacional;
+  /** Nome da função (já resolvido — não é mais uma chave fixa). */
+  funcaoNome: string;
   ubmNome: string;
   /** Brasão da UBM, já como data URL — quando ausente, usa o brasão institucional do CBMPA. */
   ubmLogoDataUrl?: string;
@@ -29,7 +29,10 @@ export interface DadosRelatorioEscala {
 }
 
 function nomeArquivo(dados: DadosRelatorioEscala): string {
-  return `escala-${dados.tipo}-${dados.funcao}-${dados.semanaInicio}.pdf`;
+  const funcaoSlug = dados.funcaoNome
+    .toLowerCase()
+    .replace(/[^a-z0-9À-ÿ]+/gi, '-');
+  return `escala-${dados.tipo}-${funcaoSlug}-${dados.semanaInicio}.pdf`;
 }
 
 export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void> {
@@ -56,7 +59,7 @@ export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void>
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  const tituloEscala = `Escala ${dados.tipo === 'ordinaria' ? 'Ordinária' : 'Extraordinária'} — ${FUNCAO_LABELS[dados.funcao]}`;
+  const tituloEscala = `Escala ${dados.tipo === 'ordinaria' ? 'Ordinária' : 'Extraordinária'} — ${dados.funcaoNome}`;
   doc.text(tituloEscala, centroX, y, { align: 'center' });
   y += 14;
 
