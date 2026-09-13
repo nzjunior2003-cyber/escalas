@@ -5,9 +5,15 @@ import { useApp } from '../../context/AppContext';
 import { redimensionarImagemParaDataUrl } from '../../lib/imagem';
 import { temPapel, type Ubm } from '../../types';
 
-/** Cadastro de UBMs — exclusivo do master (seção "Papéis" do sistema). */
+/**
+ * Cadastro de UBMs — criação/exclusão exclusiva do master. O Comandante da
+ * própria UBM também pode editar os dados institucionais dela (brasão,
+ * endereço, contato), mas não a sigla/nome nem outras unidades.
+ */
 export default function Ubms() {
   const { usuarioAtual, ubms, usuarios, addUbm, updateUbm } = useApp();
+  const isMaster = temPapel(usuarioAtual, 'master');
+  const isComandante = temPapel(usuarioAtual, 'comandante');
 
   const [isNovoOpen, setIsNovoOpen] = useState(false);
   const [editando, setEditando] = useState<Ubm | null>(null);
@@ -26,9 +32,12 @@ export default function Ubms() {
   const inputNovoRef = useRef<HTMLInputElement>(null);
   const inputEditarRef = useRef<HTMLInputElement>(null);
 
-  if (!temPapel(usuarioAtual, 'master')) {
+  if (!isMaster && !isComandante) {
     return <div className="p-8 text-center text-gray-500">Você não tem permissão para acessar este módulo.</div>;
   }
+
+  // Comandante só enxerga/edita a própria UBM; master vê e gerencia todas.
+  const ubmsVisiveis = isMaster ? ubms : ubms.filter((u) => u.id === usuarioAtual?.ubmId);
 
   const contarUsuarios = (ubmId: string) => usuarios.filter((u) => u.ubmId === ubmId).length;
 
@@ -105,22 +114,26 @@ export default function Ubms() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">UBMs</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Cadastro das Unidades de Bombeiro Militar — exclusivo do master.
+            {isMaster
+              ? 'Cadastro das Unidades de Bombeiro Militar.'
+              : 'Dados institucionais da sua UBM — brasão, endereço e contato.'}
           </p>
         </div>
-        <button
-          onClick={() => setIsNovoOpen(true)}
-          className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800"
-        >
-          <Plus className="-ml-1 mr-2 h-5 w-5" /> Nova UBM
-        </button>
+        {isMaster && (
+          <button
+            onClick={() => setIsNovoOpen(true)}
+            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800"
+          >
+            <Plus className="-ml-1 mr-2 h-5 w-5" /> Nova UBM
+          </button>
+        )}
       </div>
 
       <div className="bg-white shadow-sm rounded-lg border border-gray-200 divide-y divide-gray-200">
-        {ubms.length === 0 ? (
+        {ubmsVisiveis.length === 0 ? (
           <p className="px-6 py-10 text-center text-gray-500">Nenhuma UBM cadastrada ainda.</p>
         ) : (
-          ubms.map((u) => (
+          ubmsVisiveis.map((u) => (
             <div key={u.id} className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 hover:bg-gray-50">
               <div className="flex items-center gap-3 min-w-0">
                 {u.logoDataUrl ? (
@@ -244,12 +257,27 @@ export default function Ubms() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Sigla</label>
-                <input required value={editando.sigla} onChange={(e) => setEditando({ ...editando, sigla: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+                <input
+                  required
+                  disabled={!isMaster}
+                  value={editando.sigla}
+                  onChange={(e) => setEditando({ ...editando, sigla: e.target.value })}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
-                <input required value={editando.nome} onChange={(e) => setEditando({ ...editando, nome: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+                <input
+                  required
+                  disabled={!isMaster}
+                  value={editando.nome}
+                  onChange={(e) => setEditando({ ...editando, nome: e.target.value })}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                />
               </div>
+              {!isMaster && (
+                <p className="text-xs text-gray-400">Sigla e nome só podem ser alterados pelo master.</p>
+              )}
               <p className="text-xs font-medium text-gray-500 pt-2 border-t border-gray-100">Endereço (mostrado no rodapé do PDF de escala)</p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Endereço</label>

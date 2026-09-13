@@ -53,7 +53,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
     { name: 'Histórico', href: '/sistema/historico', icon: FileBarChart, show: isGestao },
     { name: 'Estatísticas', href: '/sistema/estatisticas', icon: PieChart, show: isGestao },
     { name: 'Usuários', href: '/sistema/usuarios', icon: ShieldCheck, show: isGestao || isMaster },
-    { name: 'UBMs', href: '/sistema/ubms', icon: Building2, show: isMaster },
+    { name: 'UBMs', href: '/sistema/ubms', icon: Building2, show: isMaster || isComandante },
     { name: 'Comandos', href: '/sistema/comandos', icon: Shield, show: isMaster },
   ].filter((item) => item.show);
 

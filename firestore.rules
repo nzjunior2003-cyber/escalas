@@ -51,6 +51,12 @@ service cloud.firestore {
       return master() || gestaoDaUbm(ubmId);
     }
 
+    // Comandante ATIVO da própria UBM (não Escalante — edição de dados
+    // institucionais da UBM fica restrita ao Comandante e ao master).
+    function comandanteDaUbm(ubmId) {
+      return temPapel('comandante') && perfilDoc().ubmId == ubmId;
+    }
+
     match /usuarios/{usuarioId} {
       allow read: if autenticado();
 
@@ -107,7 +113,13 @@ service cloud.firestore {
     // são dados sensíveis.
     match /ubms/{documento} {
       allow read: if true;
-      allow write: if master();
+      allow create, delete: if master();
+      // Comandante da própria UBM pode atualizar os dados institucionais
+      // (brasão, endereço, contato) — nunca criar ou excluir uma UBM.
+      allow update: if master()
+        || (comandanteDaUbm(documento)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['nome', 'sigla', 'logoDataUrl', 'endereco', 'cep', 'bairro', 'cidade', 'email', 'telefone']));
     }
     // Comandos (CRB/COP) são cadastrados pelo master, junto com quais UBMs
     // ficam vinculadas a cada um (ver nota em types.ts).
