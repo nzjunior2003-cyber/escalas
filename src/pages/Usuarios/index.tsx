@@ -162,55 +162,38 @@ export default function Usuarios() {
           )}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuário</th>
-                {isMaster && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UBM</th>}
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Papéis</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="relative px-6 py-3"><span className="sr-only">Ações</span></th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filtrados.length === 0 ? (
-                <tr><td colSpan={isMaster ? 5 : 4} className="px-6 py-10 text-center text-gray-500">Nenhum usuário encontrado.</td></tr>
-              ) : (
-                filtrados.map((u) => (
-                  <tr key={u.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
-                        {u.nome}{u.nomeGuerra ? ` (${u.nomeGuerra})` : ''}
-                      </div>
-                      <div className="text-sm text-gray-500">
-                        {u.email}{u.matricula ? ` — MF: ${u.matricula}` : ''}
-                      </div>
-                    </td>
-                    {isMaster && <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{nomeUbm(u.ubmId)}</td>}
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-1 flex-wrap">
-                        {u.papeis?.includes('master') && <Shield className="w-4 h-4 text-purple-600" />}
-                        {u.papeis?.includes('comandante') && <Shield className="w-4 h-4 text-red-600" />}
-                        <span className="text-xs font-medium text-gray-700">
-                          {u.papeis?.map((p) => PAPEL_LABELS[p]).join(', ')}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${u.ativo ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
-                        {u.ativo ? 'Ativo' : 'Pendente de aprovação'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button onClick={() => setUsuarioEditando({ ...u })} className="text-red-600 hover:text-red-900 mr-4" title="Editar"><Edit2 className="w-4 h-4" /></button>
-                      <button onClick={() => setUsuarioExcluindo(u.id)} className="text-gray-400 hover:text-red-600" title="Excluir"><Trash2 className="w-4 h-4" /></button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="divide-y divide-gray-200">
+          {filtrados.length === 0 ? (
+            <p className="px-6 py-10 text-center text-gray-500">Nenhum usuário encontrado.</p>
+          ) : (
+            filtrados.map((u) => (
+              <div key={u.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 sm:px-6 py-3 hover:bg-gray-50">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-gray-900">
+                    {u.nome}{u.nomeGuerra ? ` (${u.nomeGuerra})` : ''}
+                  </div>
+                  <div className="text-sm text-gray-500 truncate">
+                    {u.email}{u.matricula ? ` — MF: ${u.matricula}` : ''}
+                  </div>
+                  {isMaster && <div className="text-xs text-gray-400 mt-0.5">{nomeUbm(u.ubmId)}</div>}
+                  <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                    {u.papeis?.includes('master') && <Shield className="w-3.5 h-3.5 text-purple-600" />}
+                    {u.papeis?.includes('comandante') && <Shield className="w-3.5 h-3.5 text-red-600" />}
+                    <span className="text-xs font-medium text-gray-700">
+                      {u.papeis?.map((p) => PAPEL_LABELS[p]).join(', ')}
+                    </span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${u.ativo ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
+                      {u.ativo ? 'Ativo' : 'Pendente de aprovação'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
+                  <button onClick={() => setUsuarioEditando({ ...u })} className="p-2 -m-2 text-red-600 hover:text-red-900" title="Editar"><Edit2 className="w-4 h-4" /></button>
+                  <button onClick={() => setUsuarioExcluindo(u.id)} className="p-2 -m-2 text-gray-400 hover:text-red-600" title="Excluir"><Trash2 className="w-4 h-4" /></button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 

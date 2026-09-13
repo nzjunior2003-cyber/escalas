@@ -86,48 +86,33 @@ export default function Comandos() {
         </button>
       </div>
 
-      <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Comando</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UBMs vinculadas</th>
-              <th className="relative px-6 py-3"><span className="sr-only">Ações</span></th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {comandos.length === 0 ? (
-              <tr>
-                <td colSpan={3} className="px-6 py-10 text-center text-gray-500">Nenhum comando cadastrado ainda.</td>
-              </tr>
-            ) : (
-              comandos.map((c) => (
-                <tr key={c.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <Shield className="w-6 h-6 text-gray-400 shrink-0" />
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">{c.sigla} — {TIPO_COMANDO_LABELS[c.tipo]}</div>
-                        <div className="text-sm text-gray-500">{c.nome}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500">
-                    {c.ubmIds.length === 0 ? '—' : c.ubmIds.map(nomeDaUbm).join(', ')}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
-                    <button onClick={() => setEditando({ ...c })} className="text-red-600 hover:text-red-900" title="Editar">
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => deleteComando(c.id)} className="text-gray-400 hover:text-red-600" title="Excluir">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <div className="bg-white shadow-sm rounded-lg border border-gray-200 divide-y divide-gray-200">
+        {comandos.length === 0 ? (
+          <p className="px-6 py-10 text-center text-gray-500">Nenhum comando cadastrado ainda.</p>
+        ) : (
+          comandos.map((c) => (
+            <div key={c.id} className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 sm:px-6 py-3 hover:bg-gray-50">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <Shield className="w-6 h-6 text-gray-400 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-gray-900">{c.sigla} — {TIPO_COMANDO_LABELS[c.tipo]}</div>
+                  <div className="text-sm text-gray-500">{c.nome}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    {c.ubmIds.length === 0 ? 'Nenhuma UBM vinculada' : c.ubmIds.map(nomeDaUbm).join(', ')}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
+                <button onClick={() => setEditando({ ...c })} className="p-2 -m-2 text-red-600 hover:text-red-900" title="Editar">
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button onClick={() => deleteComando(c.id)} className="p-2 -m-2 text-gray-400 hover:text-red-600" title="Excluir">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       {isNovoOpen && (

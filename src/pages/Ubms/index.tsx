@@ -116,49 +116,32 @@ export default function Ubms() {
         </button>
       </div>
 
-      <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UBM</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuários vinculados</th>
-              <th className="relative px-6 py-3"><span className="sr-only">Ações</span></th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {ubms.length === 0 ? (
-              <tr>
-                <td colSpan={3} className="px-6 py-10 text-center text-gray-500">
-                  Nenhuma UBM cadastrada ainda.
-                </td>
-              </tr>
-            ) : (
-              ubms.map((u) => (
-                <tr key={u.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-3">
-                      {u.logoDataUrl ? (
-                        <img src={u.logoDataUrl} alt="" className="w-8 h-8 object-contain" />
-                      ) : (
-                        <Building2 className="w-6 h-6 text-gray-400" />
-                      )}
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">{u.sigla}</div>
-                        <div className="text-sm text-gray-500">{u.nome}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{contarUsuarios(u.id)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button onClick={() => setEditando({ ...u })} className="text-red-600 hover:text-red-900" title="Editar">
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <div className="bg-white shadow-sm rounded-lg border border-gray-200 divide-y divide-gray-200">
+        {ubms.length === 0 ? (
+          <p className="px-6 py-10 text-center text-gray-500">Nenhuma UBM cadastrada ainda.</p>
+        ) : (
+          ubms.map((u) => (
+            <div key={u.id} className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 hover:bg-gray-50">
+              <div className="flex items-center gap-3 min-w-0">
+                {u.logoDataUrl ? (
+                  <img src={u.logoDataUrl} alt="" className="w-8 h-8 object-contain shrink-0" />
+                ) : (
+                  <Building2 className="w-6 h-6 text-gray-400 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-gray-900">{u.sigla}</div>
+                  <div className="text-sm text-gray-500 truncate">{u.nome}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="hidden sm:inline text-xs text-gray-400">{contarUsuarios(u.id)} usuário(s)</span>
+                <button onClick={() => setEditando({ ...u })} className="p-2 -m-2 text-red-600 hover:text-red-900" title="Editar">
+                  <Edit2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       {isNovoOpen && (
