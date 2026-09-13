@@ -18,7 +18,9 @@ export default function Header({ sidebarOpen, setSidebarOpen }: HeaderProps) {
     <header className="flex-shrink-0 h-20 bg-red-800 text-white shadow-md border-b-2 border-amber-400 z-20 relative">
       <div className="flex items-stretch justify-between h-full relative z-10 w-full">
         <div className="flex items-center h-full flex-1">
-          <div className="bg-white flex items-center justify-center h-full px-4 sm:px-6 shadow-sm w-fit relative min-w-[72px]">
+          <div
+            className={`bg-white flex items-center justify-center h-full px-6 sm:px-8 shadow-sm relative transition-all duration-300 w-fit ${sidebarOpen ? 'md:w-64' : ''}`}
+          >
             <button
               type="button"
               className="md:hidden p-1 rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-none mr-2 sm:mr-4 transition-colors"
@@ -28,7 +30,11 @@ export default function Header({ sidebarOpen, setSidebarOpen }: HeaderProps) {
               <span className="sr-only">Alternar menu</span>
               <Menu className="h-6 w-6" aria-hidden="true" />
             </button>
-            <img src="/logo-cbmpa.png" alt="Brasão do CBMPA" className="w-12 h-12 sm:w-14 sm:h-14 object-contain relative z-10" />
+            <img
+              src="/brasao-duplo-cbmpa-cedec.png"
+              alt="Brasão do CBMPA e da Coordenadoria Estadual de Defesa Civil"
+              className="h-9 sm:h-10 w-auto object-contain relative z-10"
+            />
           </div>
 
           <div className="flex flex-col justify-center ml-4">

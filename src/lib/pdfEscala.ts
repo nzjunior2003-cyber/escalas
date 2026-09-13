@@ -1,8 +1,10 @@
 /**
  * Geração real de PDF (download direto, sem depender do diálogo de
  * impressão do navegador) para o relatório semanal de escala — seção 9 do
- * PRD. Usa jsPDF + jspdf-autotable, no padrão visual institucional
- * (brasão, título, tabela).
+ * PRD. Usa jsPDF + jspdf-autotable, no padrão visual institucional único
+ * (brasão CBMPA + CEDEC à esquerda no cabeçalho, brasão da UBM à direita no
+ * rodapé, matriz função × dia da semana), igual pra ordinária e
+ * extraordinária.
  */
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -10,7 +12,16 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { carregarImagemPublicaComoDataUrl } from './imagem';
 
+/** Proporção largura/altura do brasão institucional duplo (316×159px). */
+const PROPORCAO_BRASAO_DUPLO = 316 / 159;
+
+export interface FuncaoEscala {
+  id: string;
+  nome: string;
+}
+
 export interface LinhaRelatorioEscala {
+  funcaoId: string;
   data: string; // yyyy-MM-dd
   militarNome: string;
   motivo?: string;
@@ -18,118 +29,138 @@ export interface LinhaRelatorioEscala {
 
 export interface DadosRelatorioEscala {
   tipo: 'ordinaria' | 'extraordinaria';
-  /** Nome da função (já resolvido — não é mais uma chave fixa). */
-  funcaoNome: string;
   ubmNome: string;
-  /** Brasão da UBM, já como data URL — quando ausente, usa o brasão institucional do CBMPA. */
+  /** Brasão da UBM, já como data URL — mostrado no rodapé, à direita. */
   ubmLogoDataUrl?: string;
+  /** Nome do CRB ao qual a UBM está vinculada, quando já cadastrado. */
+  crbNome?: string;
   /** Segunda-feira da semana do relatório (yyyy-MM-dd). */
   semanaInicio: string;
+  /** Funções da UBM que compõem as linhas da matriz, na ordem desejada. */
+  funcoes: FuncaoEscala[];
   linhas: LinhaRelatorioEscala[];
 }
 
 function nomeArquivo(dados: DadosRelatorioEscala): string {
-  const funcaoSlug = dados.funcaoNome
-    .toLowerCase()
-    .replace(/[^a-z0-9À-ÿ]+/gi, '-');
-  return `escala-${dados.tipo}-${funcaoSlug}-${dados.semanaInicio}.pdf`;
+  const ubmSlug = dados.ubmNome.toLowerCase().replace(/[^a-z0-9À-ÿ]+/gi, '-');
+  return `escala-${dados.tipo}-${ubmSlug}-${dados.semanaInicio}.pdf`;
 }
 
 export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void> {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const larguraPagina = doc.internal.pageSize.getWidth();
-  const centroX = larguraPagina / 2;
-  let y = 48;
+  const alturaPagina = doc.internal.pageSize.getHeight();
+  const margemLateral = 40;
+  const larguraUtil = larguraPagina - margemLateral * 2;
+  let y = 40;
 
-  const logoDataUrl = dados.ubmLogoDataUrl ?? (await carregarImagemPublicaComoDataUrl('/logo-cbmpa.png'));
-  if (logoDataUrl) {
-    const tamanhoLogo = 48;
-    doc.addImage(logoDataUrl, 'PNG', centroX - tamanhoLogo / 2, y, tamanhoLogo, tamanhoLogo);
-    y += tamanhoLogo + 10;
+  // --- Cabeçalho: brasão institucional à esquerda, textos centralizados na
+  // faixa restante --------------------------------------------------------
+  const logoInstitucionalDataUrl = await carregarImagemPublicaComoDataUrl('/brasao-duplo-cbmpa-cedec.png');
+  const larguraLogo = 78;
+  const alturaLogo = larguraLogo / PROPORCAO_BRASAO_DUPLO;
+  if (logoInstitucionalDataUrl) {
+    doc.addImage(logoInstitucionalDataUrl, 'PNG', margemLateral, y, larguraLogo, alturaLogo);
+  }
+
+  const centroTextoX = margemLateral + larguraLogo + (larguraUtil - larguraLogo) / 2;
+  let yTexto = y + 6;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('CORPO DE BOMBEIROS MILITAR DO PARÁ', centroTextoX, yTexto, { align: 'center' });
+  yTexto += 16;
+
+  if (dados.crbNome) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(dados.crbNome, centroTextoX, yTexto, { align: 'center' });
+    yTexto += 14;
   }
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.text('CORPO DE BOMBEIROS MILITAR DO PARÁ', centroX, y, { align: 'center' });
-  y += 18;
-
   doc.setFontSize(11);
-  doc.text(dados.ubmNome, centroX, y, { align: 'center' });
-  y += 20;
+  doc.text(dados.ubmNome, centroTextoX, yTexto, { align: 'center' });
+  yTexto += 16;
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  const tituloEscala = `Escala ${dados.tipo === 'ordinaria' ? 'Ordinária' : 'Extraordinária'} — ${dados.funcaoNome}`;
-  doc.text(tituloEscala, centroX, y, { align: 'center' });
-  y += 14;
+  const tituloEscala = `Escala ${dados.tipo === 'ordinaria' ? 'Ordinária' : 'Extraordinária'}`;
+  doc.text(tituloEscala, centroTextoX, yTexto, { align: 'center' });
+  yTexto += 13;
 
   const inicio = new Date(dados.semanaInicio + 'T00:00:00');
   const fim = new Date(dados.semanaInicio + 'T00:00:00');
   fim.setDate(fim.getDate() + 6);
   doc.setTextColor(120);
-  doc.text(
-    `Semana de ${format(inicio, 'dd/MM/yyyy')} a ${format(fim, 'dd/MM/yyyy')}`,
-    centroX,
-    y,
-    { align: 'center' },
-  );
+  doc.text(`Semana de ${format(inicio, 'dd/MM/yyyy')} a ${format(fim, 'dd/MM/yyyy')}`, centroTextoX, yTexto, {
+    align: 'center',
+  });
   doc.setTextColor(0);
-  y += 16;
+
+  y = Math.max(y + alturaLogo, yTexto) + 10;
 
   doc.setDrawColor(127, 29, 29);
   doc.setLineWidth(1.2);
-  doc.line(40, y, larguraPagina - 40, y);
-  y += 12;
+  doc.line(margemLateral, y, larguraPagina - margemLateral, y);
+  y += 14;
 
+  // --- Matriz: função nas linhas, dias da semana (com data) nas colunas --
   const dias = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(dados.semanaInicio + 'T00:00:00');
     d.setDate(d.getDate() + i);
     return format(d, 'yyyy-MM-dd');
   });
 
-  const cabecalho =
-    dados.tipo === 'extraordinaria'
-      ? ['Data', 'Dia', 'Militar Escalado', 'Motivo']
-      : ['Data', 'Dia', 'Militar Escalado'];
+  const cabecalho = [
+    'Função',
+    ...dias.map((dia) => {
+      const d = new Date(dia + 'T00:00:00');
+      return `${format(d, 'EEE', { locale: ptBR }).toUpperCase()}\n${format(d, 'dd/MM')}`;
+    }),
+  ];
 
-  const corpo = dias.flatMap((dia) => {
-    const doDia = dados.linhas.filter((l) => l.data === dia);
-    const dataFormatada = format(new Date(dia + 'T00:00:00'), 'dd/MM');
-    const diaSemana = format(new Date(dia + 'T00:00:00'), 'EEEE', { locale: ptBR });
+  const celula = (funcaoId: string, dia: string): string => {
+    const doDia = dados.linhas.filter((l) => l.funcaoId === funcaoId && l.data === dia);
+    if (doDia.length === 0) return '—';
+    return doDia
+      .map((l) => (dados.tipo === 'extraordinaria' && l.motivo ? `${l.militarNome} (${l.motivo})` : l.militarNome))
+      .join('\n');
+  };
 
-    if (doDia.length === 0) {
-      return [
-        dados.tipo === 'extraordinaria'
-          ? [dataFormatada, diaSemana, 'Sem escala', '—']
-          : [dataFormatada, diaSemana, 'Sem escala'],
-      ];
-    }
-
-    return doDia.map((l) =>
-      dados.tipo === 'extraordinaria'
-        ? [dataFormatada, diaSemana, l.militarNome, l.motivo ?? '—']
-        : [dataFormatada, diaSemana, l.militarNome],
-    );
-  });
+  const corpo = dados.funcoes.map((f) => [f.nome, ...dias.map((dia) => celula(f.id, dia))]);
 
   autoTable(doc, {
     startY: y,
     head: [cabecalho],
     body: corpo,
-    margin: { left: 40, right: 40 },
-    headStyles: { fillColor: [127, 29, 29], textColor: 255, fontStyle: 'bold' },
-    styles: { fontSize: 9, cellPadding: 6 },
+    margin: { left: margemLateral, right: margemLateral },
+    headStyles: { fillColor: [127, 29, 29], textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 8 },
+    styles: { fontSize: 8.5, cellPadding: 5, valign: 'middle' },
+    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 90 } },
     alternateRowStyles: { fillColor: [249, 250, 251] },
   });
 
+  // --- Rodapé: brasão da UBM à direita, texto institucional à esquerda ---
   const alturaFinal = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+  let yRodape = alturaFinal + 24;
+
   doc.setFontSize(8);
   doc.setTextColor(150);
-  doc.text(
-    'Documento gerado pelo Sistema de Gerenciamento de Jornada de Trabalho — CBMPA.',
-    40,
-    alturaFinal + 24,
-  );
+  doc.text('Documento gerado pelo Sistema de Gerenciamento de Jornada de Trabalho — CBMPA.', margemLateral, yRodape);
+  doc.setTextColor(0);
+
+  if (dados.ubmLogoDataUrl) {
+    const tamanhoBrasaoUbm = 40;
+    const yBrasaoUbm = Math.min(yRodape - 10, alturaPagina - margemLateral - tamanhoBrasaoUbm);
+    doc.addImage(
+      dados.ubmLogoDataUrl,
+      'PNG',
+      larguraPagina - margemLateral - tamanhoBrasaoUbm,
+      yBrasaoUbm,
+      tamanhoBrasaoUbm,
+      tamanhoBrasaoUbm,
+    );
+  }
 
   doc.save(nomeArquivo(dados));
 }

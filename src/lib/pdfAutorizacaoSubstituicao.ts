@@ -41,11 +41,18 @@ export async function gerarPdfAutorizacaoSubstituicao(dados: DadosAutorizacaoSub
   const centroX = larguraPagina / 2;
   let y = 44;
 
-  const logoDataUrl = dados.ubmLogoDataUrl ?? (await carregarImagemPublicaComoDataUrl('/logo-cbmpa.png'));
+  const logoDataUrl = dados.ubmLogoDataUrl ?? (await carregarImagemPublicaComoDataUrl('/brasao-duplo-cbmpa-cedec.png'));
   if (logoDataUrl) {
-    const tamanhoLogo = 42;
-    doc.addImage(logoDataUrl, 'PNG', centroX - tamanhoLogo / 2, y, tamanhoLogo, tamanhoLogo);
-    y += tamanhoLogo + 8;
+    if (dados.ubmLogoDataUrl) {
+      const tamanhoLogo = 42;
+      doc.addImage(logoDataUrl, 'PNG', centroX - tamanhoLogo / 2, y, tamanhoLogo, tamanhoLogo);
+      y += tamanhoLogo + 8;
+    } else {
+      const larguraLogo = 80;
+      const alturaLogo = larguraLogo / (316 / 159);
+      doc.addImage(logoDataUrl, 'PNG', centroX - larguraLogo / 2, y, larguraLogo, alturaLogo);
+      y += alturaLogo + 8;
+    }
   }
 
   doc.setFont('helvetica', 'bold');

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { startOfWeek, addDays } from 'date-fns';
 import { Download } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -12,14 +12,9 @@ export default function Relatorios() {
   const ubmId = usuarioAtual?.ubmId ?? '';
   const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
 
-  const [funcao, setFuncao] = useState<string>('');
   const [semana, setSemana] = useState(formatarDataISO(startOfWeek(new Date(), { weekStartsOn: 1 })));
   const [gerando, setGerando] = useState<'ordinaria' | 'extraordinaria' | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!funcao && funcoesDaUbm.length > 0) setFuncao(funcoesDaUbm[0].id);
-  }, [funcao, funcoesDaUbm]);
 
   if (!temPapel(usuarioAtual, 'comandante') && !temPapel(usuarioAtual, 'escalante')) {
     return <div className="p-8 text-center text-gray-500">Você não tem permissão para acessar este módulo.</div>;
@@ -34,8 +29,9 @@ export default function Relatorios() {
       const dias = Array.from({ length: 7 }, (_, i) => formatarDataISO(addDays(new Date(semana + 'T00:00:00'), i)));
       const escalas = tipo === 'ordinaria' ? escalasOrdinarias : escalasExtraordinarias;
       const linhas = escalas
-        .filter((e) => e.ubmId === ubmId && e.funcao === funcao && dias.includes(e.data))
+        .filter((e) => e.ubmId === ubmId && dias.includes(e.data))
         .map((e) => ({
+          funcaoId: e.funcao,
           data: e.data,
           militarNome: (() => {
             const militar = militares.find((m) => m.id === e.militarId);
@@ -46,10 +42,10 @@ export default function Relatorios() {
 
       await gerarPdfEscala({
         tipo,
-        funcaoNome: funcoes.find((f) => f.id === funcao)?.nome ?? 'Função removida',
         ubmNome: ubm ? `${ubm.sigla} - ${ubm.nome}` : 'Unidade de Bombeiro Militar',
         ubmLogoDataUrl: ubm?.logoDataUrl,
         semanaInicio: semana,
+        funcoes: funcoesDaUbm.map((f) => ({ id: f.id, nome: f.nome })),
         linhas,
       });
     } catch (e) {
@@ -63,44 +59,50 @@ export default function Relatorios() {
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Relatórios</h1>
-        <p className="mt-1 text-sm text-gray-500">Geração de PDF padronizado semanal (escala ordinária e extraordinária) para publicidade/afixação oficial.</p>
+        <p className="mt-1 text-sm text-gray-500">
+          Geração de PDF padronizado semanal (escala ordinária e extraordinária) para publicidade/afixação oficial —
+          uma matriz única com todas as funções da UBM nas linhas e os dias da semana nas colunas.
+        </p>
       </div>
 
       <div className="bg-white p-6 rounded-lg border border-gray-200 space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
-            <select value={funcao} onChange={(e) => setFuncao(e.target.value)} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3">
-              {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
-              {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Semana (segunda-feira)</label>
-            <input type="date" value={semana} onChange={(e) => setSemana(e.target.value)} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
-          </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Semana (segunda-feira)</label>
+          <input
+            type="date"
+            value={semana}
+            onChange={(e) => setSemana(e.target.value)}
+            className="w-full sm:w-64 border border-gray-300 rounded-md text-sm py-2 px-3"
+          />
         </div>
+
+        {funcoesDaUbm.length === 0 && (
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
+            Nenhuma função cadastrada nesta UBM ainda. Cadastre em "Funções" antes de gerar o relatório.
+          </p>
+        )}
 
         {erro && <p className="text-sm text-red-600">{erro}</p>}
 
         <div className="flex gap-3">
           <button
             onClick={() => baixarPdf('ordinaria')}
-            disabled={gerando !== null}
+            disabled={gerando !== null || funcoesDaUbm.length === 0}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50"
           >
             <Download className="-ml-1 mr-2 h-4 w-4" /> {gerando === 'ordinaria' ? 'Gerando...' : 'PDF Escala Ordinária'}
           </button>
           <button
             onClick={() => baixarPdf('extraordinaria')}
-            disabled={gerando !== null}
+            disabled={gerando !== null || funcoesDaUbm.length === 0}
             className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
           >
             <Download className="-ml-1 mr-2 h-4 w-4" /> {gerando === 'extraordinaria' ? 'Gerando...' : 'PDF Escala Extraordinária'}
           </button>
         </div>
         <p className="text-xs text-gray-400">
-          O download começa automaticamente, no padrão visual institucional (brasão, cabeçalho da UBM, tabela por dia da semana).
+          O download começa automaticamente, no padrão visual institucional (brasão CBMPA/CEDEC no cabeçalho, brasão
+          da UBM no rodapé, matriz de função × dia da semana).
         </p>
       </div>
     </div>

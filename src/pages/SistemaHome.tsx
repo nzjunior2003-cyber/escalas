@@ -45,7 +45,7 @@ function PainelMaster() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <CabecalhoBrasao logoSrc="/logo-cbmpa.png" subtitulo="Administração — CBMPA" />
+      <CabecalhoBrasao logoSrc="/brasao-duplo-cbmpa-cedec.png" subtitulo="Administração — CBMPA" />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard titulo="UBMs cadastradas" valor={ubms.length} icone={Building2} cor="border-l-blue-500" />
@@ -93,7 +93,7 @@ export default function SistemaHome() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <CabecalhoBrasao logoSrc={ubm?.logoDataUrl || '/logo-cbmpa.png'} subtitulo={ubm?.nome ?? 'Unidade de Bombeiro Militar'} />
+      <CabecalhoBrasao logoSrc={ubm?.logoDataUrl || '/brasao-duplo-cbmpa-cedec.png'} subtitulo={ubm?.nome ?? 'Unidade de Bombeiro Militar'} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard titulo="Efetivo ativo" valor={militaresDaUbm.length} icone={Users} cor="border-l-blue-500" />
