@@ -17,6 +17,7 @@ import Usuarios from './pages/Usuarios';
 import Ubms from './pages/Ubms';
 import Comandos from './pages/Comandos';
 import Reforcos from './pages/Reforcos';
+import PainelRegional from './pages/PainelRegional';
 import Alertas from './pages/Alertas';
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
                 <Route path="ubms" element={<Ubms />} />
                 <Route path="comandos" element={<Comandos />} />
                 <Route path="reforcos" element={<Reforcos />} />
+                <Route path="painel-regional" element={<PainelRegional />} />
                 <Route path="alertas" element={<Alertas />} />
               </Route>
             </Route>
