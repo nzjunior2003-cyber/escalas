@@ -109,6 +109,12 @@ service cloud.firestore {
       allow read: if true;
       allow write: if master();
     }
+    // Comandos (CRB/COP) são cadastrados pelo master, junto com quais UBMs
+    // ficam vinculadas a cada um (ver nota em types.ts).
+    match /comandos/{documento} {
+      allow read: if ativo();
+      allow write: if master();
+    }
     match /militares/{documento} {
       allow read: if ativo();
       allow create: if podeGerenciarUbm(request.resource.data.ubmId);
@@ -164,6 +170,18 @@ service cloud.firestore {
         (resource.data.indicadoId == request.auth.uid && resource.data.status == 'aguardando_indicado') ||
         podeGerenciarUbm(resource.data.ubmId)
       );
+    }
+    // Solicitação de Reforço (CRB/COP -> UBM, ver nota em types.ts): só
+    // quem tem o papel 'crb'/'cop' no comando de origem cria, e só pra uma
+    // UBM de fato vinculada àquele comando; só quem gerencia a UBM alvo
+    // (Comandante/Escalante/master) atende ou recusa.
+    match /solicitacoes_reforco/{documento} {
+      allow read: if ativo();
+      allow create: if ativo()
+        && (temPapel('crb') || temPapel('cop'))
+        && perfilDoc().comandoId == request.resource.data.comandoId
+        && get(/databases/$(database)/documents/comandos/$(request.resource.data.comandoId)).data.ubmIds.hasAny([request.resource.data.ubmId]);
+      allow update: if podeGerenciarUbm(resource.data.ubmId);
     }
     match /alertas/{documento} {
       allow read: if ativo() && resource.data.usuarioId == request.auth.uid;

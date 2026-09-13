@@ -12,6 +12,8 @@ import {
   Building2,
   Menu,
   ListChecks,
+  Shield,
+  Radio,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useApp } from '../../context/AppContext';
@@ -30,6 +32,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
   const isComandante = temPapel(usuarioAtual, 'comandante');
   const isEscalante = temPapel(usuarioAtual, 'escalante');
   const isGestao = isComandante || isEscalante;
+  const isComando = temPapel(usuarioAtual, 'crb') || temPapel(usuarioAtual, 'cop');
   // Um master "puro" (sem UBM) não opera escala/solicitações/presença de
   // ninguém; mas se ele também acumula comandante/escalante numa UBM
   // (papéis podem coexistir na mesma pessoa), esses módulos voltam a fazer
@@ -44,10 +47,12 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
     { name: 'Solicitações', href: '/sistema/solicitacoes', icon: Send, show: temUbm },
     { name: 'Afastamentos', href: '/sistema/afastamentos', icon: UserX, show: isGestao },
     { name: 'Presença', href: '/sistema/presenca', icon: ClipboardCheck, show: temUbm },
+    { name: 'Reforços', href: '/sistema/reforcos', icon: Radio, show: isComando || isGestao },
     { name: 'Relatórios', href: '/sistema/relatorios', icon: FileBarChart, show: isGestao },
     { name: 'Estatísticas', href: '/sistema/estatisticas', icon: PieChart, show: isGestao },
     { name: 'Usuários', href: '/sistema/usuarios', icon: ShieldCheck, show: isGestao || isMaster },
     { name: 'UBMs', href: '/sistema/ubms', icon: Building2, show: isMaster },
+    { name: 'Comandos', href: '/sistema/comandos', icon: Shield, show: isMaster },
   ].filter((item) => item.show);
 
   return (

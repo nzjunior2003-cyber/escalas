@@ -1,27 +1,34 @@
 // ---------------------------------------------------------------------------
 // Papéis de acesso (RBAC). Comandante e Escalante podem coexistir na mesma
 // pessoa (mesmo login com os dois papéis) — por isso `papeis` é um array, e
-// não um campo único. Um usuário sem 'comandante'/'escalante'/'master' é
-// tratado como Militar (usuário comum): só consulta a própria escala e faz
-// solicitações.
+// não um campo único. Um usuário sem 'comandante'/'escalante'/'master'/
+// 'crb'/'cop' é tratado como Militar (usuário comum): só consulta a própria
+// escala e faz solicitações.
 //
 // 'master' é o único papel sem vínculo com uma UBM específica: é quem define
 // quem é Comandante/Escalante de cada UBM (esses podem mudar) e cadastra as
 // próprias UBMs — só o master atribui ou remove os papéis 'master',
-// 'comandante' e 'escalante' de qualquer usuário. Um usuário master tem
-// `ubmId: ''` (nenhuma UBM), já que atua no CBMPA como um todo.
+// 'comandante', 'escalante', 'crb' e 'cop' de qualquer usuário. Um usuário
+// master tem `ubmId: ''` (nenhuma UBM), já que atua no CBMPA como um todo.
+//
+// 'crb' (Comando Regional de Bombeiros) e 'cop' (Comando de Operações)
+// também não pertencem a uma UBM (ubmId: ''), mas sim a um `Comando` (ver
+// abaixo) vinculado a várias UBMs — é dali que disparam solicitação de
+// reforço de militares pras UBMs vinculadas.
 // ---------------------------------------------------------------------------
-export type Papel = 'master' | 'comandante' | 'escalante' | 'militar';
+export type Papel = 'master' | 'comandante' | 'escalante' | 'militar' | 'crb' | 'cop';
 
 export const PAPEL_LABELS: Record<Papel, string> = {
   master: 'Master (CBMPA)',
   comandante: 'Comandante da UBM',
   escalante: 'Escalante',
   militar: 'Militar (usuário comum)',
+  crb: 'CRB (Comando Regional de Bombeiros)',
+  cop: 'COP (Comando de Operações)',
 };
 
 /** Papéis cuja atribuição é exclusiva do master (ver nota acima). */
-export const PAPEIS_RESTRITOS_AO_MASTER: Papel[] = ['master', 'comandante', 'escalante'];
+export const PAPEIS_RESTRITOS_AO_MASTER: Papel[] = ['master', 'comandante', 'escalante', 'crb', 'cop'];
 
 export interface Usuario {
   id: string;
@@ -37,11 +44,13 @@ export interface Usuario {
    * matrícula sem expor o restante do perfil a quem não está autenticado.
    */
   matricula?: string;
-  /** Vazio ('') para o papel 'master', que não pertence a nenhuma UBM específica. */
+  /** Vazio ('') para os papéis 'master', 'crb' e 'cop', que não pertencem a uma UBM específica. */
   ubmId: string;
   papeis: Papel[];
   /** Vínculo com o cadastro de efetivo (Militar), quando o usuário também é escalado. */
   militarId?: string;
+  /** Vínculo com o Comando (CRB/COP), só quando papeis inclui 'crb' ou 'cop'. */
+  comandoId?: string;
   cargo?: string;
   ativo: boolean;
   criado_em?: string;
@@ -60,6 +69,27 @@ export interface Ubm {
   sigla: string;
   /** Brasão da UBM (data URL, já redimensionado) — mostrado no painel da unidade após o login. */
   logoDataUrl?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Comando (CRB ou COP) — cadastrado pelo master, vinculado a várias UBMs.
+// CRB e COP são paralelos entre si (nenhuma hierarquia um sobre o outro);
+// cada um dispara solicitação de reforço direto pras UBMs que tem vinculadas.
+// ---------------------------------------------------------------------------
+export type TipoComando = 'crb' | 'cop';
+
+export const TIPO_COMANDO_LABELS: Record<TipoComando, string> = {
+  crb: 'CRB — Comando Regional de Bombeiros',
+  cop: 'COP — Comando de Operações',
+};
+
+export interface Comando {
+  id: string;
+  tipo: TipoComando;
+  nome: string;
+  sigla: string;
+  /** UBMs vinculadas a este comando — só pra elas ele pode disparar solicitação de reforço. */
+  ubmIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +211,7 @@ export type MotivoAfastamento =
   | 'dispensa_medica'
   | 'atestado_medico'
   | 'missao_externa'
+  | 'reforco_crb_cop'
   | 'outro';
 
 export const MOTIVO_AFASTAMENTO_LABELS: Record<MotivoAfastamento, string> = {
@@ -189,6 +220,7 @@ export const MOTIVO_AFASTAMENTO_LABELS: Record<MotivoAfastamento, string> = {
   dispensa_medica: 'Dispensa médica',
   atestado_medico: 'Atestado médico',
   missao_externa: 'Missão externa',
+  reforco_crb_cop: 'Reforço (CRB/COP)',
   outro: 'Outro',
 };
 
@@ -197,9 +229,11 @@ export const MOTIVO_AFASTAMENTO_LABELS: Record<MotivoAfastamento, string> = {
  * `src/lib/escala.ts`): a pessoa segue "devendo" o serviço e é priorizada
  * ao voltar. Dispensa médica é autorizada pela junta médica e NÃO entra
  * aqui — só o atestado médico comum (avaliação isolada, sem passar pela
- * junta) e a missão externa geram essa fila.
+ * junta), a missão externa e o reforço pra CRB/COP geram essa fila (nos
+ * três casos a pessoa seguiu servindo, só que fora da rotação normal da
+ * própria UBM).
  */
-export const MOTIVOS_COM_FILA_DE_RECUPERACAO: MotivoAfastamento[] = ['atestado_medico', 'missao_externa'];
+export const MOTIVOS_COM_FILA_DE_RECUPERACAO: MotivoAfastamento[] = ['atestado_medico', 'missao_externa', 'reforco_crb_cop'];
 
 export interface Afastamento {
   id: string;
@@ -209,6 +243,8 @@ export interface Afastamento {
   detalhe?: string;
   dataInicio: string;
   dataFim: string;
+  /** Preenchido quando o afastamento foi gerado automaticamente ao atender uma SolicitacaoReforco. */
+  origemReforcoId?: string;
   criadoPorId: string;
   criado_em: string;
 }
@@ -305,6 +341,47 @@ export interface SolicitacaoServico {
 }
 
 // ---------------------------------------------------------------------------
+// Solicitação de Reforço (CRB/COP -> UBM)
+//
+// O CRB ou o COP pede militares de uma função/posto pra uma UBM vinculada,
+// pra atender escala extraordinária ou operação. O escalante da UBM recebe
+// alerta, vê a sugestão automática do sistema (mesmo motor de equidade —
+// `sugerirMilitarExtraordinario`), pode trocar o militar e atende ou recusa.
+// Atender NUNCA mexe na escala do sistema — em vez disso, gera um
+// `Afastamento` (motivo 'reforco_crb_cop') pro militar empenhado, o que já
+// o torna indisponível pra ser escalado na própria UBM nesse período e o
+// credita normalmente na equidade (ver MOTIVOS_COM_FILA_DE_RECUPERACAO).
+// ---------------------------------------------------------------------------
+export type StatusSolicitacaoReforco = 'pendente' | 'atendida' | 'recusada';
+
+export const STATUS_SOLICITACAO_REFORCO_LABELS: Record<StatusSolicitacaoReforco, string> = {
+  pendente: 'Pendente',
+  atendida: 'Atendida',
+  recusada: 'Recusada',
+};
+
+export interface SolicitacaoReforco {
+  id: string;
+  comandoId: string;
+  ubmId: string;
+  /** Id de `FuncaoUbm` da UBM alvo. */
+  funcao: string;
+  /** Posto/graduação desejado — texto livre (ex.: "Sargento"), opcional. */
+  postoDesejado?: string;
+  data: string; // yyyy-MM-dd
+  motivo: string;
+  status: StatusSolicitacaoReforco;
+  /** Sugestão automática do sistema (mesmo motor de equidade da extraordinária). */
+  militarSugeridoId?: string;
+  /** Militar efetivamente empenhado — preenchido ao atender. */
+  militarId?: string;
+  criadoPorId: string;
+  criado_em: string;
+  atendidoPorId?: string;
+  atendido_em?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Alertas / notificações
 // ---------------------------------------------------------------------------
 export type TipoAlerta =
@@ -312,6 +389,8 @@ export type TipoAlerta =
   | 'aceite_indicado'
   | 'aprovacao_escalante'
   | 'alteracao_diferenciada'
+  | 'solicitacao_reforco'
+  | 'reforco_atendido'
   | 'geral';
 
 export interface Alerta {

@@ -2,12 +2,12 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Search, UserPlus, Shield, Edit2, X, Trash2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { PAPEL_LABELS, PAPEIS_RESTRITOS_AO_MASTER, Papel, Usuario, temPapel } from '../../types';
+import { PAPEL_LABELS, PAPEIS_RESTRITOS_AO_MASTER, Papel, TIPO_COMANDO_LABELS, Usuario, temPapel } from '../../types';
 
 const TODOS_PAPEIS = Object.keys(PAPEL_LABELS) as Papel[];
 
 export default function Usuarios() {
-  const { usuarioAtual, usuarios, ubms, militares, updateUsuario, deleteUsuario, addUsuario } = useApp();
+  const { usuarioAtual, usuarios, ubms, comandos, militares, updateUsuario, deleteUsuario, addUsuario } = useApp();
 
   const isMaster = temPapel(usuarioAtual, 'master');
   const isGestao = temPapel(usuarioAtual, 'comandante') || temPapel(usuarioAtual, 'escalante');
@@ -27,6 +27,7 @@ export default function Usuarios() {
     ubmId: '',
     papeis: ['militar'] as Papel[],
     militarId: '',
+    comandoId: '',
     ativo: true,
   });
 
@@ -70,7 +71,7 @@ export default function Usuarios() {
     if (!usuarioEditando) return;
     try {
       await updateUsuario(usuarioEditando.id, {
-        ...(isMaster ? { papeis: usuarioEditando.papeis, ubmId: usuarioEditando.ubmId } : {}),
+        ...(isMaster ? { papeis: usuarioEditando.papeis, ubmId: usuarioEditando.ubmId, comandoId: usuarioEditando.comandoId || undefined } : {}),
         ativo: usuarioEditando.ativo,
         militarId: usuarioEditando.militarId || undefined,
       });
@@ -112,10 +113,11 @@ export default function Usuarios() {
         ubmId: ubmIdDestino,
         papeis: isMaster ? novoForm.papeis : ['militar'],
         militarId: novoForm.militarId || undefined,
+        comandoId: novoForm.comandoId || undefined,
         ativo: novoForm.ativo,
       });
       setIsNovoOpen(false);
-      setNovoForm({ nome: '', email: '', senha: '', cargo: '', ubmId: '', papeis: ['militar'], militarId: '', ativo: true });
+      setNovoForm({ nome: '', email: '', senha: '', cargo: '', ubmId: '', papeis: ['militar'], militarId: '', comandoId: '', ativo: true });
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível criar o usuário.');
     } finally {
@@ -247,6 +249,21 @@ export default function Usuarios() {
                       ))}
                     </div>
                   </div>
+                  {(usuarioEditando.papeis.includes('crb') || usuarioEditando.papeis.includes('cop')) && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Comando (CRB/COP)</label>
+                      <select
+                        value={usuarioEditando.comandoId ?? ''}
+                        onChange={(e) => setUsuarioEditando({ ...usuarioEditando, comandoId: e.target.value || undefined })}
+                        className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md border sm:text-sm"
+                      >
+                        <option value="">Selecione o comando</option>
+                        {comandos
+                          .filter((c) => usuarioEditando.papeis.includes(c.tipo))
+                          .map((c) => <option key={c.id} value={c.id}>{c.sigla} — {TIPO_COMANDO_LABELS[c.tipo]}</option>)}
+                      </select>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div>
@@ -318,6 +335,17 @@ export default function Usuarios() {
                       </label>
                     ))}
                   </div>
+                  {(novoForm.papeis.includes('crb') || novoForm.papeis.includes('cop')) && (
+                    <div className="mt-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Comando (CRB/COP)</label>
+                      <select value={novoForm.comandoId} onChange={(e) => setNovoForm({ ...novoForm, comandoId: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm">
+                        <option value="">Selecione o comando</option>
+                        {comandos
+                          .filter((c) => novoForm.papeis.includes(c.tipo))
+                          .map((c) => <option key={c.id} value={c.id}>{c.sigla} — {TIPO_COMANDO_LABELS[c.tipo]}</option>)}
+                      </select>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-xs text-gray-400">

@@ -15,6 +15,8 @@ import Relatorios from './pages/Relatorios';
 import Estatisticas from './pages/Estatisticas';
 import Usuarios from './pages/Usuarios';
 import Ubms from './pages/Ubms';
+import Comandos from './pages/Comandos';
+import Reforcos from './pages/Reforcos';
 import Alertas from './pages/Alertas';
 
 export default function App() {
@@ -38,6 +40,8 @@ export default function App() {
                 <Route path="estatisticas" element={<Estatisticas />} />
                 <Route path="usuarios" element={<Usuarios />} />
                 <Route path="ubms" element={<Ubms />} />
+                <Route path="comandos" element={<Comandos />} />
+                <Route path="reforcos" element={<Reforcos />} />
                 <Route path="alertas" element={<Alertas />} />
               </Route>
             </Route>

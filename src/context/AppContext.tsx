@@ -46,6 +46,7 @@ import type { LinhaMilitar } from '../lib/csvMilitares';
 import {
   Afastamento,
   Alerta,
+  Comando,
   EscalaDiferenciada,
   EscalaExtraordinaria,
   EscalaOrdinaria,
@@ -55,7 +56,9 @@ import {
   ModalidadeSolicitacaoServico,
   RegistroPresenca,
   SolicitacaoAlteracaoDiferenciada,
+  SolicitacaoReforco,
   SolicitacaoServico,
+  StatusSolicitacaoReforco,
   StatusSolicitacaoServico,
   TipoEscalaServico,
   Ubm,
@@ -64,6 +67,7 @@ import {
 
 interface AppContextData {
   ubms: Ubm[];
+  comandos: Comando[];
   usuarios: Usuario[];
   militares: Militar[];
   funcoes: FuncaoUbm[];
@@ -74,6 +78,7 @@ interface AppContextData {
   afastamentos: Afastamento[];
   presencas: RegistroPresenca[];
   solicitacoesServico: SolicitacaoServico[];
+  solicitacoesReforco: SolicitacaoReforco[];
   alertas: Alerta[];
 
   usuarioAtual: Usuario | null;
@@ -101,6 +106,11 @@ interface AppContextData {
 
   addUbm: (dados: Omit<Ubm, 'id'>) => Promise<string>;
   updateUbm: (id: string, dados: Partial<Ubm>) => Promise<void>;
+
+  /** Cadastro de Comandos (CRB/COP) — exclusivo do master. */
+  addComando: (dados: Omit<Comando, 'id'>) => Promise<string>;
+  updateComando: (id: string, dados: Partial<Comando>) => Promise<void>;
+  deleteComando: (id: string) => Promise<void>;
 
   updateUsuario: (id: string, dados: Partial<Usuario>) => Promise<void>;
   addUsuario: (dados: Omit<Usuario, 'id' | 'criado_em'> & { senha: string }) => Promise<void>;
@@ -147,6 +157,18 @@ interface AppContextData {
   responderSolicitacaoIndicado: (id: string, aceitar: boolean) => Promise<void>;
   /** Aprovação final — Comandante OU Escalante da UBM. */
   responderSolicitacaoAprovador: (id: string, aprovar: boolean) => Promise<void>;
+
+  /** Solicitação de reforço de militar — disparada por CRB/COP pra uma UBM vinculada. */
+  criarSolicitacaoReforco: (dados: {
+    comandoId: string;
+    ubmId: string;
+    funcao: string;
+    postoDesejado?: string;
+    data: string;
+    motivo: string;
+  }) => Promise<string>;
+  /** Escalante/Comandante da UBM atende (empenha o militar) ou recusa. */
+  responderSolicitacaoReforco: (id: string, decisao: { atender: boolean; militarId?: string }) => Promise<void>;
 
   marcarAlertaLida: (id: string) => Promise<void>;
 }
@@ -266,6 +288,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // Lida mesmo sem login: a tela de "Solicitar Acesso" precisa listar as
   // UBMs para quem ainda não tem conta (ver firestore.rules).
   const ubms = useColecao<Ubm>('ubms', isFirebaseConfigured);
+  const comandos = useColecao<Comando>('comandos', isAuthenticated);
   const usuarios = useColecao<Usuario>('usuarios', isAuthenticated);
   const militares = useColecao<Militar>('militares', isAuthenticated);
   const funcoes = useColecao<FuncaoUbm>('funcoes', isAuthenticated);
@@ -279,6 +302,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const afastamentos = useColecao<Afastamento>('afastamentos', isAuthenticated);
   const presencas = useColecao<RegistroPresenca>('presencas', isAuthenticated);
   const solicitacoesServico = useColecao<SolicitacaoServico>('solicitacoes_servico', isAuthenticated);
+  const solicitacoesReforco = useColecao<SolicitacaoReforco>('solicitacoes_reforco', isAuthenticated);
   const alertas = useColecao<Alerta>('alertas', isAuthenticated, {
     campo: 'usuarioId',
     valor: usuarioAtual?.id ?? '',
@@ -530,6 +554,23 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     await updateDoc(doc(db, 'ubms', id), semIndefinidosParaAtualizar(dados));
   }, []);
 
+  // --- Comandos (CRB/COP) — cadastrados pelo master --------------------------
+  const addComando = useCallback(async (dados: Omit<Comando, 'id'>) => {
+    const db = requireDb();
+    const ref = await addDoc(collection(db, 'comandos'), semIndefinidosParaCriar(dados));
+    return ref.id;
+  }, []);
+
+  const updateComando = useCallback(async (id: string, dados: Partial<Comando>) => {
+    const db = requireDb();
+    await updateDoc(doc(db, 'comandos', id), semIndefinidosParaAtualizar(dados));
+  }, []);
+
+  const deleteComando = useCallback(async (id: string) => {
+    const db = requireDb();
+    await deleteDoc(doc(db, 'comandos', id));
+  }, []);
+
   // --- Funções operacionais (cadastro por UBM) ------------------------------
   const addFuncao = useCallback(async (dados: { ubmId: string; nome: string }) => {
     const db = requireDb();
@@ -764,6 +805,106 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [escalasExtraordinarias],
   );
 
+  // --- Solicitação de Reforço (CRB/COP -> UBM) ------------------------------
+  const criarSolicitacaoReforco = useCallback(
+    async (dados: { comandoId: string; ubmId: string; funcao: string; postoDesejado?: string; data: string; motivo: string }) => {
+      const db = requireDb();
+      const sugerido = sugerirMilitarExtraordinario({
+        ubmId: dados.ubmId,
+        funcao: dados.funcao,
+        data: dados.data,
+        militares,
+        afastamentos,
+        escalasOrdinarias,
+        extraordinariasAnteriores: escalasExtraordinarias,
+      });
+
+      const ref = await addDoc(collection(db, 'solicitacoes_reforco'), {
+        ...semIndefinidosParaCriar(dados),
+        status: 'pendente' as StatusSolicitacaoReforco,
+        militarSugeridoId: sugerido?.id,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      const aprovadores = usuarios.filter(
+        (u) => u.ubmId === dados.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+      );
+      await Promise.all(
+        aprovadores.map((a) =>
+          notificar(a.id, 'solicitacao_reforco', 'Chegou uma solicitação de reforço de militar pra sua UBM.', '/sistema/reforcos'),
+        ),
+      );
+      return ref.id;
+    },
+    [militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarios, usuarioAtual, notificar],
+  );
+
+  /**
+   * Atender NUNCA mexe na escala do sistema — gera um Afastamento (motivo
+   * 'reforco_crb_cop') pro militar empenhado, que já o torna indisponível
+   * na própria UBM nesse período e credita normalmente na equidade (fila de
+   * recuperação, ver MOTIVOS_COM_FILA_DE_RECUPERACAO).
+   */
+  const responderSolicitacaoReforco = useCallback(
+    async (id: string, decisao: { atender: boolean; militarId?: string }) => {
+      const db = requireDb();
+      const solicitacao = solicitacoesReforco.find((s) => s.id === id);
+      if (!solicitacao) throw new Error('Solicitação de reforço não encontrada.');
+
+      if (decisao.atender) {
+        const militarFinal = decisao.militarId ?? solicitacao.militarSugeridoId;
+        if (!militarFinal) throw new Error('Nenhum militar selecionado pra atender essa solicitação.');
+        if (extraordinariasNoMes(militarFinal, solicitacao.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
+          throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
+        }
+
+        const comando = comandos.find((c) => c.id === solicitacao.comandoId);
+        await addDoc(collection(db, 'afastamentos'), {
+          militarId: militarFinal,
+          ubmId: solicitacao.ubmId,
+          motivo: 'reforco_crb_cop',
+          detalhe: `${comando ? `${comando.sigla} — ` : ''}${solicitacao.motivo}`,
+          dataInicio: solicitacao.data,
+          dataFim: solicitacao.data,
+          origemReforcoId: id,
+          criadoPorId: usuarioAtual?.id ?? '',
+          criado_em: new Date().toISOString(),
+        });
+
+        await updateDoc(doc(db, 'solicitacoes_reforco', id), {
+          status: 'atendida' as StatusSolicitacaoReforco,
+          militarId: militarFinal,
+          atendidoPorId: usuarioAtual?.id ?? '',
+          atendido_em: new Date().toISOString(),
+        });
+
+        const usuarioMilitar = usuarios.find((u) => u.militarId === militarFinal);
+        if (usuarioMilitar) {
+          await notificar(
+            usuarioMilitar.id,
+            'reforco_atendido',
+            'Você foi empenhado num reforço solicitado pelo CRB/COP.',
+            '/sistema/afastamentos',
+          );
+        }
+      } else {
+        await updateDoc(doc(db, 'solicitacoes_reforco', id), {
+          status: 'recusada' as StatusSolicitacaoReforco,
+          atendidoPorId: usuarioAtual?.id ?? '',
+          atendido_em: new Date().toISOString(),
+        });
+      }
+
+      const comandoUsuarios = usuarios.filter(
+        (u) => u.comandoId === solicitacao.comandoId && (u.papeis?.includes('crb') || u.papeis?.includes('cop')),
+      );
+      const mensagem = decisao.atender ? 'A UBM atendeu sua solicitação de reforço.' : 'A UBM recusou sua solicitação de reforço.';
+      await Promise.all(comandoUsuarios.map((u) => notificar(u.id, 'reforco_atendido', mensagem, '/sistema/reforcos')));
+    },
+    [solicitacoesReforco, comandos, usuarios, escalasExtraordinarias, usuarioAtual, notificar],
+  );
+
   // --- Escala diferenciada -------------------------------------------------
   const solicitarEscalaDiferenciada = useCallback(
     async (dados: { militarId: string; ubmId: string; data: string; observacao?: string }) => {
@@ -987,6 +1128,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const valor = useMemo<AppContextData>(
     () => ({
       ubms,
+      comandos,
       usuarios,
       militares,
       funcoes,
@@ -997,6 +1139,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       afastamentos,
       presencas,
       solicitacoesServico,
+      solicitacoesReforco,
       alertas,
       usuarioAtual,
       isAuthenticated,
@@ -1010,6 +1153,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       primeiroAcessoPorMatricula,
       addUbm,
       updateUbm,
+      addComando,
+      updateComando,
+      deleteComando,
       updateUsuario,
       addUsuario,
       deleteUsuario,
@@ -1036,10 +1182,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       criarSolicitacaoServico,
       responderSolicitacaoIndicado,
       responderSolicitacaoAprovador,
+      criarSolicitacaoReforco,
+      responderSolicitacaoReforco,
       marcarAlertaLida,
     }),
     [
       ubms,
+      comandos,
       usuarios,
       militares,
       funcoes,
@@ -1050,6 +1199,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       afastamentos,
       presencas,
       solicitacoesServico,
+      solicitacoesReforco,
       alertas,
       usuarioAtual,
       isAuthenticated,
@@ -1062,6 +1212,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       primeiroAcessoPorMatricula,
       addUbm,
       updateUbm,
+      addComando,
+      updateComando,
+      deleteComando,
       updateUsuario,
       addUsuario,
       deleteUsuario,
@@ -1088,6 +1241,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       criarSolicitacaoServico,
       responderSolicitacaoIndicado,
       responderSolicitacaoAprovador,
+      criarSolicitacaoReforco,
+      responderSolicitacaoReforco,
       marcarAlertaLida,
     ],
   );
