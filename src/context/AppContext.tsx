@@ -52,6 +52,7 @@ import {
   FUNCOES_PADRAO,
   FuncaoUbm,
   Militar,
+  ModalidadeSolicitacaoServico,
   RegistroPresenca,
   SolicitacaoAlteracaoDiferenciada,
   SolicitacaoServico,
@@ -134,9 +135,21 @@ interface AppContextData {
 
   registrarPresenca: (dados: Omit<RegistroPresenca, 'id' | 'criado_em' | 'registradoPorId'>) => Promise<void>;
 
-  criarSolicitacaoServico: (dados: { ubmId: string; tipo: TipoSolicitacaoServico; escalaOrigemId: string; tipoEscalaOrigem: TipoEscalaServico; escalaDestinoId?: string; indicadoId: string; motivo?: string }) => Promise<void>;
+  criarSolicitacaoServico: (dados: {
+    ubmId: string;
+    tipo: TipoSolicitacaoServico;
+    modalidade: ModalidadeSolicitacaoServico;
+    horarioParcial?: string;
+    localEvento?: string;
+    escalaOrigemId: string;
+    tipoEscalaOrigem: TipoEscalaServico;
+    escalaDestinoId?: string;
+    indicadoId: string;
+    motivo?: string;
+  }) => Promise<void>;
   responderSolicitacaoIndicado: (id: string, aceitar: boolean) => Promise<void>;
-  responderSolicitacaoEscalante: (id: string, aprovar: boolean) => Promise<void>;
+  /** Aprovação final — Comandante OU Escalante da UBM. */
+  responderSolicitacaoAprovador: (id: string, aprovar: boolean) => Promise<void>;
 
   marcarAlertaLida: (id: string) => Promise<void>;
 }
@@ -861,11 +874,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [presencas, usuarioAtual],
   );
 
-  // --- Solicitações de serviço (substituição / permuta) --------------------
+  // --- Solicitações de serviço (Autorização de Substituição / Permuta) -----
   const criarSolicitacaoServico = useCallback(
     async (dados: {
       ubmId: string;
       tipo: TipoSolicitacaoServico;
+      modalidade: ModalidadeSolicitacaoServico;
+      horarioParcial?: string;
+      localEvento?: string;
       escalaOrigemId: string;
       tipoEscalaOrigem: TipoEscalaServico;
       escalaDestinoId?: string;
@@ -874,7 +890,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }) => {
       const db = requireDb();
       const ref = await addDoc(collection(db, 'solicitacoes_servico'), {
-        ...dados,
+        ...semIndefinidosParaCriar(dados),
         solicitanteId: usuarioAtual?.id ?? '',
         status: 'aguardando_indicado' as StatusSolicitacaoServico,
         criado_em: new Date().toISOString(),
@@ -886,7 +902,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           indicado.id,
           'solicitacao_servico',
           `Você recebeu um pedido de ${dados.tipo === 'permuta' ? 'permuta' : 'substituição'} de escala.`,
-          `/sistema/solicitacoes/${ref.id}`,
+          `/sistema/solicitacoes`,
         );
       }
     },
@@ -900,60 +916,46 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (!solicitacao) throw new Error('Solicitação não encontrada.');
 
       await updateDoc(doc(db, 'solicitacoes_servico', id), {
-        status: aceitar ? 'aguardando_escalante' : 'recusada_indicado',
+        status: aceitar ? 'aguardando_aprovacao' : 'recusada_indicado',
         respondido_em: new Date().toISOString(),
       });
 
-      const escalantes = usuarios.filter(
-        (u) => u.ubmId === solicitacao.ubmId && u.papeis?.includes('escalante'),
+      const aprovadores = usuarios.filter(
+        (u) => u.ubmId === solicitacao.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
       );
       const solicitante = usuarios.find((u) => u.id === solicitacao.solicitanteId);
 
       if (aceitar) {
         await Promise.all(
-          escalantes.map((e) =>
-            notificar(e.id, 'aprovacao_escalante', 'Uma solicitação de serviço aguarda sua aprovação.', `/sistema/solicitacoes/${id}`),
+          aprovadores.map((a) =>
+            notificar(a.id, 'aprovacao_escalante', 'Uma autorização de substituição aguarda sua aprovação.', `/sistema/solicitacoes`),
           ),
         );
       } else if (solicitante) {
-        await notificar(solicitante.id, 'solicitacao_servico', 'Sua solicitação de serviço foi recusada pelo militar indicado.');
+        await notificar(solicitante.id, 'solicitacao_servico', 'Seu pedido de autorização de substituição foi recusado pelo militar indicado.');
       }
     },
     [solicitacoesServico, usuarios, notificar],
   );
 
-  const responderSolicitacaoEscalante = useCallback(
+  /** Aprovação final — pelo Comandante OU pelo Escalante da UBM. NUNCA altera o registro de escala gerado pelo sistema (ver nota em types.ts): só o escalante muda a escala, e sempre manualmente. */
+  const responderSolicitacaoAprovador = useCallback(
     async (id: string, aprovar: boolean) => {
       const db = requireDb();
       const solicitacao = solicitacoesServico.find((s) => s.id === id);
       if (!solicitacao) throw new Error('Solicitação não encontrada.');
 
       await updateDoc(doc(db, 'solicitacoes_servico', id), {
-        status: aprovar ? 'aprovada' : 'recusada_escalante',
+        status: aprovar ? 'aprovada' : 'recusada_aprovacao',
         aprovadoPorId: usuarioAtual?.id ?? '',
         respondido_em: new Date().toISOString(),
       });
 
-      if (aprovar) {
-        const colecaoOrigem = solicitacao.tipoEscalaOrigem === 'ordinaria' ? 'escalas_ordinarias' : 'escalas_extraordinarias';
-        // Substituição: a vaga do solicitante passa a ser do indicado.
-        await updateDoc(doc(db, colecaoOrigem, solicitacao.escalaOrigemId), {
-          militarId: solicitacao.indicadoId,
-        });
-
-        // Permuta: também troca a vaga do indicado para o solicitante.
-        if (solicitacao.tipo === 'permuta' && solicitacao.escalaDestinoId) {
-          await updateDoc(doc(db, colecaoOrigem, solicitacao.escalaDestinoId), {
-            militarId: solicitacao.solicitanteId,
-          });
-        }
-      }
-
       const solicitante = usuarios.find((u) => u.id === solicitacao.solicitanteId);
       const indicado = usuarios.find((u) => u.id === solicitacao.indicadoId);
       const mensagem = aprovar
-        ? 'Sua solicitação de serviço foi aprovada pelo escalante e já está refletida na escala.'
-        : 'Sua solicitação de serviço foi recusada pelo escalante.';
+        ? 'Sua autorização de substituição foi aprovada — o PDF já pode ser gerado. A escala do sistema não muda automaticamente; no dia, o CMT de SOS registra a presença do substituto.'
+        : 'Seu pedido de autorização de substituição foi recusado.';
       if (solicitante) await notificar(solicitante.id, 'solicitacao_servico', mensagem);
       if (indicado) await notificar(indicado.id, 'solicitacao_servico', mensagem);
     },
@@ -1017,7 +1019,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       registrarPresenca,
       criarSolicitacaoServico,
       responderSolicitacaoIndicado,
-      responderSolicitacaoEscalante,
+      responderSolicitacaoAprovador,
       marcarAlertaLida,
     }),
     [
@@ -1069,7 +1071,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       registrarPresenca,
       criarSolicitacaoServico,
       responderSolicitacaoIndicado,
-      responderSolicitacaoEscalante,
+      responderSolicitacaoAprovador,
       marcarAlertaLida,
     ],
   );

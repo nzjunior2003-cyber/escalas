@@ -153,9 +153,17 @@ service cloud.firestore {
       allow read: if ativo();
       allow write: if ativo();
     }
+    // Autorização de Substituição / Permuta (ver nota em types.ts): só o
+    // próprio solicitante cria; só o indicado responde enquanto pendente com
+    // ele; a aprovação final (Comandante OU Escalante da UBM) é a única
+    // etapa que pode mudar o status depois disso.
     match /solicitacoes_servico/{documento} {
       allow read: if ativo();
-      allow write: if ativo();
+      allow create: if ativo() && request.resource.data.solicitanteId == request.auth.uid;
+      allow update: if ativo() && (
+        (resource.data.indicadoId == request.auth.uid && resource.data.status == 'aguardando_indicado') ||
+        podeGerenciarUbm(resource.data.ubmId)
+      );
     }
     match /alertas/{documento} {
       allow read: if ativo() && resource.data.usuarioId == request.auth.uid;

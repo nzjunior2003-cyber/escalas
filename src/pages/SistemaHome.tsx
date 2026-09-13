@@ -85,7 +85,7 @@ export default function SistemaHome() {
     escalasOrdinarias.filter((e) => e.ubmId === ubmId && e.data === hoje).length +
     escalasExtraordinarias.filter((e) => e.ubmId === ubmId && e.data === hoje).length;
   const solicitacoesPendentes = solicitacoesServico.filter(
-    (s) => s.ubmId === ubmId && (s.status === 'aguardando_indicado' || s.status === 'aguardando_escalante'),
+    (s) => s.ubmId === ubmId && (s.status === 'aguardando_indicado' || s.status === 'aguardando_aprovacao'),
   ).length;
   const afastamentosAtivos = afastamentos.filter(
     (a) => a.ubmId === ubmId && a.dataInicio <= hoje && a.dataFim >= hoje,

@@ -8,9 +8,12 @@ const TODOS_STATUS = Object.keys(STATUS_PRESENCA_LABELS) as StatusPresenca[];
 export default function Presenca() {
   const {
     usuarioAtual,
+    usuarios,
     militares,
+    funcoes,
     escalasOrdinarias,
     escalasExtraordinarias,
+    solicitacoesServico,
     presencas,
     registrarPresenca,
   } = useApp();
@@ -29,11 +32,37 @@ export default function Presenca() {
     return [...ord, ...extra];
   }, [escalasOrdinarias, escalasExtraordinarias, ubmId, data]);
 
-  const souCmtDeSosNoDia = escaladosNoDia.some((e) => e.funcao === 'cmt_sos' && e.militarId === meuMilitarId);
+  const nomeDaFuncao = (funcaoId: string) => funcoes.find((f) => f.id === funcaoId)?.nome ?? 'Função removida';
+  const ehFuncaoCmtDeSos = (funcaoId: string) => nomeDaFuncao(funcaoId) === 'Comandante de Socorro (CMT de SOS)';
+
+  const souCmtDeSosNoDia = escaladosNoDia.some((e) => ehFuncaoCmtDeSos(e.funcao) && e.militarId === meuMilitarId);
   const isGestao = temPapel(usuarioAtual, 'comandante') || temPapel(usuarioAtual, 'escalante');
   const podeRegistrar = souCmtDeSosNoDia || isGestao;
 
-  const guarnicaoDoDia = escaladosNoDia.filter((e) => e.funcao !== 'cmt_sos');
+  const guarnicaoDoDia = escaladosNoDia.filter((e) => !ehFuncaoCmtDeSos(e.funcao));
+
+  /**
+   * Autorização de substituição aprovada (ver types.ts) nunca altera o
+   * registro de escala — então, pra saber quem de fato apresenta-se no dia,
+   * é preciso cruzar com `solicitacoesServico` aprovadas: tanto o lado
+   * "origem" (o titular saiu, o indicado assume) quanto o lado "destino" de
+   * uma permuta (o indicado saiu da vaga original, o titular assume).
+   */
+  const substitutoAprovado = (escalaId: string, tipoEscala: TipoEscalaServico) => {
+    const comoOrigem = solicitacoesServico.find(
+      (s) => s.status === 'aprovada' && s.tipoEscalaOrigem === tipoEscala && s.escalaOrigemId === escalaId,
+    );
+    if (comoOrigem) return { militarUsuarioId: comoOrigem.indicadoId, tituloUsuarioId: comoOrigem.solicitanteId };
+
+    const comoDestino = solicitacoesServico.find(
+      (s) => s.status === 'aprovada' && s.tipo === 'permuta' && s.tipoEscalaOrigem === tipoEscala && s.escalaDestinoId === escalaId,
+    );
+    if (comoDestino) return { militarUsuarioId: comoDestino.solicitanteId, tituloUsuarioId: comoDestino.indicadoId };
+
+    return null;
+  };
+
+  const militarIdDoUsuario = (usuarioId: string) => usuarios.find((u) => u.id === usuarioId)?.militarId;
 
   const statusAtual = (escalaId: string, militarId: string) =>
     presencas.find((p) => p.escalaId === escalaId && p.militarId === militarId)?.status;
@@ -67,12 +96,22 @@ export default function Presenca() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {guarnicaoDoDia.map((e) => {
-              const militar = militares.find((m) => m.id === e.militarId);
-              const atual = statusAtual(e.id, e.militarId);
+              const substituicao = substitutoAprovado(e.id, e.tipoEscala);
+              const militarIdEfetivo = substituicao ? militarIdDoUsuario(substituicao.militarUsuarioId) ?? e.militarId : e.militarId;
+              const militar = militares.find((m) => m.id === militarIdEfetivo);
+              const titular = militares.find((m) => m.id === e.militarId);
+              const atual = statusAtual(e.id, militarIdEfetivo);
               return (
                 <tr key={`${e.tipoEscala}-${e.id}`}>
-                  <td className="px-4 py-2">{militar?.nome ?? '—'}</td>
-                  <td className="px-4 py-2 capitalize">{e.funcao.replace('_', ' ')}</td>
+                  <td className="px-4 py-2">
+                    {militar?.nome ?? '—'}
+                    {substituicao && (
+                      <span className="block text-[11px] text-amber-600 font-medium">
+                        Substituto autorizado no lugar de {titular?.nome ?? '—'}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">{nomeDaFuncao(e.funcao)}</td>
                   <td className="px-4 py-2">
                     {podeRegistrar ? (
                       <select
@@ -83,7 +122,7 @@ export default function Presenca() {
                             escalaId: e.id,
                             tipoEscala: e.tipoEscala,
                             data,
-                            militarId: e.militarId,
+                            militarId: militarIdEfetivo,
                             status: ev.target.value as StatusPresenca,
                           })
                         }

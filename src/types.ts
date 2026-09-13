@@ -243,28 +243,51 @@ export interface RegistroPresenca {
 
 // ---------------------------------------------------------------------------
 // Autorização de Serviço (substituição) e Permuta
+//
+// Fluxo: o solicitante ("sai") escolhe uma escala real já dele e indica o
+// substituto ("entra") -> o indicado precisa aceitar primeiro
+// (aguardando_indicado) -> só depois vai para aprovação do Comandante OU do
+// Escalante da UBM (aguardando_aprovacao) -> aprovada libera o PDF de
+// "Autorização de Serviço Extraordinário/Ordinário". Aprovar NUNCA altera o
+// registro de escala gerado pelo sistema — fica só registrado aqui, e é o
+// CMT de SOS quem, no dia, marca a presença do substituto (RegistroPresenca
+// aceita militarId diferente do da escala); mudar a escala em si continua
+// sendo exclusividade do escalante, de forma manual.
 // ---------------------------------------------------------------------------
 export type TipoSolicitacaoServico = 'substituicao' | 'permuta';
 
+/** Integral: o substituto assume as 24h do serviço. Parcial: só uma faixa de horário (`horarioParcial`). */
+export type ModalidadeSolicitacaoServico = 'integral' | 'parcial';
+
+export const MODALIDADE_SOLICITACAO_LABELS: Record<ModalidadeSolicitacaoServico, string> = {
+  integral: 'Integral (24h)',
+  parcial: 'Parcial (faixa de horário)',
+};
+
 export type StatusSolicitacaoServico =
   | 'aguardando_indicado'
-  | 'aguardando_escalante'
+  | 'aguardando_aprovacao'
   | 'aprovada'
   | 'recusada_indicado'
-  | 'recusada_escalante';
+  | 'recusada_aprovacao';
 
 export const STATUS_SOLICITACAO_LABELS: Record<StatusSolicitacaoServico, string> = {
   aguardando_indicado: 'Aguardando aceite do indicado',
-  aguardando_escalante: 'Aguardando aprovação do escalante',
+  aguardando_aprovacao: 'Aguardando aprovação do Comandante/Escalante',
   aprovada: 'Aprovada',
   recusada_indicado: 'Recusada pelo indicado',
-  recusada_escalante: 'Recusada pelo escalante',
+  recusada_aprovacao: 'Recusada pelo Comandante/Escalante',
 };
 
 export interface SolicitacaoServico {
   id: string;
   ubmId: string;
   tipo: TipoSolicitacaoServico;
+  modalidade: ModalidadeSolicitacaoServico;
+  /** Só quando modalidade === 'parcial' — ex.: "19h às 07h". */
+  horarioParcial?: string;
+  /** Local do serviço/evento, pro documento de autorização — opcional. */
+  localEvento?: string;
   /** Escala (ordinária/extraordinária) do solicitante que originou o pedido. */
   escalaOrigemId: string;
   tipoEscalaOrigem: TipoEscalaServico;
