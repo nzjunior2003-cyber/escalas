@@ -4,7 +4,7 @@ import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarDays, Plus, Sparkles } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { formatarDataISO } from '../../lib/escala';
+import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO } from '../../lib/escala';
 import { temPapel } from '../../types';
 
 type Aba = 'ordinaria' | 'extraordinaria' | 'diferenciada';
@@ -258,6 +258,15 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
             {doUbm.map((e) => {
               const sugerido = militares.find((m) => m.id === e.militarSugeridoId);
               const candidatos = militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(e.funcao));
+
+              const handleAlterar = async (novoMilitarId: string) => {
+                try {
+                  await alterarMilitarExtraordinaria(e.id, novoMilitarId);
+                } catch (erro) {
+                  alert(erro instanceof Error ? erro.message : 'Não foi possível alterar o militar escalado.');
+                }
+              };
+
               return (
                 <tr key={e.id}>
                   <td className="px-4 py-2">{e.data}</td>
@@ -266,8 +275,12 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
                   <td className="px-4 py-2 text-gray-500">{sugerido?.nome ?? '—'}</td>
                   <td className="px-4 py-2">
                     {isEscalante ? (
-                      <select value={e.militarId} onChange={(ev) => alterarMilitarExtraordinaria(e.id, ev.target.value)} className="border border-gray-200 rounded text-sm">
-                        {candidatos.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
+                      <select value={e.militarId} onChange={(ev) => handleAlterar(ev.target.value)} className="border border-gray-200 rounded text-sm">
+                        {candidatos.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.nome} ({extraordinariasNoMes(m.id, e.data, escalasExtraordinarias)}/{LIMITE_EXTRAORDINARIAS_POR_MES} no mês)
+                          </option>
+                        ))}
                       </select>
                     ) : (
                       militares.find((m) => m.id === e.militarId)?.nome ?? '—'

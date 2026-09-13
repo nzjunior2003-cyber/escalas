@@ -18,11 +18,15 @@
  *   desempatando por quem serviu há mais tempo (ou nunca serviu). Isso
  *   equaliza sozinho mesmo com militares entrando/saindo da função ou com
  *   gerações parciais e repetidas ao longo do ano.
- * - Escala extraordinária: sugestão automática priorizando quem está há
- *   mais tempo sem reforço extraordinário (o "mais folgado") — o mesmo
- *   princípio de equalização, aplicado um reforço de cada vez. A alteração
- *   manual pelo escalante NÃO deve corromper essa contagem: a estatística
- *   conta sempre o `militarSugeridoId` original, mesmo que `militarId` (o
+ * - Escala extraordinária: sugestão automática priorizando quem tem MENOS
+ *   serviços no total — ordinária E extraordinária somadas, não só
+ *   extraordinária — na função (o "mais folgado" dos dois tipos juntos),
+ *   desempatando por quem está há mais tempo sem reforço extraordinário.
+ *   Ninguém é sugerido (nem aceito manualmente) acima de
+ *   `LIMITE_EXTRAORDINARIAS_POR_MES` reforços no mesmo mês — teto de
+ *   sobrecarga por militar, contado em qualquer função. A alteração manual
+ *   pelo escalante NÃO deve corromper essa contagem: a estatística conta
+ *   sempre o `militarSugeridoId` original, mesmo que `militarId` (o
  *   efetivamente escalado) seja outro — a exceção fica registrada em
  *   separado (militarId !== militarSugeridoId).
  *
@@ -181,11 +185,24 @@ export function calcularDiasFolga(
   return Math.max(0, diasNoPeriodo - diasEscalado);
 }
 
+/** Teto mensal de reforços extraordinários por militar (item 7 do pedido do CBMPA) — protege contra sobrecarga e força a equalização a girar entre mais gente. */
+export const LIMITE_EXTRAORDINARIAS_POR_MES = 12;
+
+/** Quantas extraordinárias (qualquer função) o militar já tem no mesmo mês/ano de `data`. */
+export function extraordinariasNoMes(militarId: string, data: string, extraordinarias: EscalaExtraordinaria[]): number {
+  const mes = data.slice(0, 7); // yyyy-MM
+  return extraordinarias.filter((e) => e.militarId === militarId && e.data.slice(0, 7) === mes).length;
+}
+
 /**
  * Sugere o militar para uma escala extraordinária: dentro do rodízio da
- * função solicitada, prioriza quem está há mais tempo sem ser escalado em
- * extraordinária (estatística baseada em `militarSugeridoId`, não no
- * `militarId` final — ver nota do módulo).
+ * função solicitada, prioriza quem está mais "folgado" — considerando o
+ * total de serviços já feitos (ordinária + extraordinária juntas, não só
+ * extraordinária) —, e nunca sugere quem já bateu o teto mensal de
+ * `LIMITE_EXTRAORDINARIAS_POR_MES` reforços (esse sim conta só
+ * extraordinária, e em qualquer função — é limite de sobrecarga do
+ * militar, não da função). Estatística de recorrência baseada em
+ * `militarSugeridoId`, não no `militarId` final — ver nota do módulo.
  */
 export function sugerirMilitarExtraordinario(params: {
   ubmId: string;
@@ -193,12 +210,13 @@ export function sugerirMilitarExtraordinario(params: {
   data: string;
   militares: Militar[];
   afastamentos: Afastamento[];
+  escalasOrdinarias: EscalaOrdinaria[];
   extraordinariasAnteriores: EscalaExtraordinaria[];
 }): Militar | null {
-  const { ubmId, funcao, data, afastamentos, extraordinariasAnteriores } = params;
-  const elegiveis = militaresDaFuncao(params.militares, ubmId, funcao).filter(
-    (m) => !estaAfastado(m.id, data, afastamentos),
-  );
+  const { ubmId, funcao, data, afastamentos, escalasOrdinarias, extraordinariasAnteriores } = params;
+  const elegiveis = militaresDaFuncao(params.militares, ubmId, funcao)
+    .filter((m) => !estaAfastado(m.id, data, afastamentos))
+    .filter((m) => extraordinariasNoMes(m.id, data, extraordinariasAnteriores) < LIMITE_EXTRAORDINARIAS_POR_MES);
   if (elegiveis.length === 0) return null;
 
   const ultimaVezPorMilitar = new Map<string, string>();
@@ -208,8 +226,9 @@ export function sugerirMilitarExtraordinario(params: {
     if (!atual || e.data > atual) ultimaVezPorMilitar.set(e.militarSugeridoId, e.data);
   }
 
-  // Quem nunca foi escalado em extraordinária vem primeiro (data "infinitamente" antiga);
-  // entre os demais, o que está há mais tempo sem reforço extraordinário —
+  // Prioridade principal: menor total de serviços (ordinária + extraordinária,
+  // até a data) na função — o mais folgado dos dois tipos combinados vem
+  // primeiro. Desempate: há mais tempo sem reforço extraordinário —
   // descontando dias de férias/licença/dispensa médica/outro que caíram
   // depois do último reforço (não geram fila de recuperação: empurram a
   // "última vez" pra frente, como se tivessem sido servidos naquele meio
@@ -217,13 +236,27 @@ export function sugerirMilitarExtraordinario(params: {
   // continua contando a favor da prioridade de recuperação depois.
   const comOrdenacao = elegiveis
     .map((m) => {
+      const servicosOrdinaria = escalasOrdinarias.filter(
+        (e) => e.ubmId === ubmId && e.funcao === funcao && e.militarId === m.id && e.data <= data,
+      ).length;
+      const servicosExtraordinaria = extraordinariasAnteriores.filter(
+        (e) => e.funcao === funcao && e.militarSugeridoId === m.id && e.data <= data,
+      ).length;
+      const totalServicos = servicosOrdinaria + servicosExtraordinaria;
+
       const ultimaReal = ultimaVezPorMilitar.get(m.id);
-      if (!ultimaReal) return { militar: m, ultimaData: '' };
-      const isentosNoIntervalo = diasIsentosAteData(m.id, data, afastamentos) - diasIsentosAteData(m.id, ultimaReal, afastamentos);
-      const dataAjustada = isentosNoIntervalo > 0 ? formatarDataISO(addDays(parseISO(ultimaReal), isentosNoIntervalo)) : ultimaReal;
-      return { militar: m, ultimaData: dataAjustada };
+      let ultimaData = '';
+      if (ultimaReal) {
+        const isentosNoIntervalo = diasIsentosAteData(m.id, data, afastamentos) - diasIsentosAteData(m.id, ultimaReal, afastamentos);
+        ultimaData = isentosNoIntervalo > 0 ? formatarDataISO(addDays(parseISO(ultimaReal), isentosNoIntervalo)) : ultimaReal;
+      }
+      return { militar: m, totalServicos, ultimaData };
     })
-    .sort((a, b) => a.ultimaData.localeCompare(b.ultimaData));
+    .sort((a, b) => {
+      const diferenca = a.totalServicos - b.totalServicos;
+      if (diferenca !== 0) return diferenca;
+      return a.ultimaData.localeCompare(b.ultimaData);
+    });
 
   return comOrdenacao[0]?.militar ?? null;
 }

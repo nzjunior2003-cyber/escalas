@@ -40,7 +40,7 @@ import {
   requireFirebaseAuth,
 } from '../lib/firebase';
 import { enviarEmail } from '../lib/emailService';
-import { gerarEscalaOrdinaria, sugerirMilitarExtraordinario } from '../lib/escala';
+import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, gerarEscalaOrdinaria, sugerirMilitarExtraordinario } from '../lib/escala';
 import { buscarMilitarPorMatricula, normalizarMatricula } from '../lib/planilhaEfetivo';
 import type { LinhaMilitar } from '../lib/csvMilitares';
 import {
@@ -717,9 +717,23 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         data: dados.data,
         militares,
         afastamentos,
+        escalasOrdinarias,
         extraordinariasAnteriores: escalasExtraordinarias,
       });
-      if (!sugerido) throw new Error('Nenhum militar disponível nessa função para sugerir.');
+      if (!sugerido) {
+        throw new Error(
+          'Nenhum militar disponível nessa função para sugerir (todos afastados ou já no teto de ' +
+            `${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês).`,
+        );
+      }
+
+      const militarFinal = dados.militarIdEscolhido ?? sugerido.id;
+      if (
+        dados.militarIdEscolhido &&
+        extraordinariasNoMes(militarFinal, dados.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES
+      ) {
+        throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
+      }
 
       const ref = await addDoc(collection(db, 'escalas_extraordinarias'), {
         ubmId: dados.ubmId,
@@ -727,21 +741,28 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         data: dados.data,
         motivo: dados.motivo,
         militarSugeridoId: sugerido.id,
-        militarId: dados.militarIdEscolhido ?? sugerido.id,
+        militarId: militarFinal,
         criadoPorId: usuarioAtual?.id ?? '',
         criado_em: new Date().toISOString(),
       });
       return ref.id;
     },
-    [militares, afastamentos, escalasExtraordinarias, usuarioAtual],
+    [militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarioAtual],
   );
 
-  const alterarMilitarExtraordinaria = useCallback(async (id: string, militarId: string) => {
-    const db = requireDb();
-    // O militarSugeridoId nunca é sobrescrito — a estatística de rodízio
-    // continua contando como se a sugestão tivesse sido seguida.
-    await updateDoc(doc(db, 'escalas_extraordinarias', id), { militarId });
-  }, []);
+  const alterarMilitarExtraordinaria = useCallback(
+    async (id: string, militarId: string) => {
+      const db = requireDb();
+      const atual = escalasExtraordinarias.find((e) => e.id === id);
+      if (atual && extraordinariasNoMes(militarId, atual.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
+        throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
+      }
+      // O militarSugeridoId nunca é sobrescrito — a estatística de rodízio
+      // continua contando como se a sugestão tivesse sido seguida.
+      await updateDoc(doc(db, 'escalas_extraordinarias', id), { militarId });
+    },
+    [escalasExtraordinarias],
+  );
 
   // --- Escala diferenciada -------------------------------------------------
   const solicitarEscalaDiferenciada = useCallback(
