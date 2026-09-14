@@ -178,8 +178,56 @@ export interface EscalaExtraordinaria {
   militarSugeridoId: string;
   /** Militar efetivamente escalado — pode ter sido alterado pelo escalante. */
   militarId: string;
+  /** Preenchido quando essa escala veio de uma VagaVoluntariaExtraordinaria (ver nota abaixo). */
+  vagaVoluntariaId?: string;
   criadoPorId: string;
   criado_em: string;
+}
+
+// ---------------------------------------------------------------------------
+// Vaga voluntária de escala extraordinária
+//
+// Extraordinária é voluntária por natureza — só vira escalação compulsória se
+// ninguém se voluntariar. O escalante dispara a vaga (função + data + motivo)
+// com um prazo pro efetivo elegível se voluntariar; todo mundo elegível recebe
+// alerta. Assim que alguém se voluntaria, o sistema já confirma — sem esperar
+// os demais nem o prazo. Só se o prazo vencer sem ninguém se voluntariar é que
+// o escalante resolve compulsoriamente (mesmo motor de sugestão de sempre).
+// Em qualquer um dos dois casos, `militarSugeridoId` (quem o algoritmo de
+// equidade apontaria — o "mais folgado") fica registrado pra estatística,
+// mesmo que quem tenha se voluntariado seja outra pessoa — a mesma lógica já
+// usada quando o escalante altera manualmente uma extraordinária.
+// ---------------------------------------------------------------------------
+export type StatusVagaVoluntaria = 'aberta' | 'preenchida' | 'expirada_compulsoria';
+
+export const STATUS_VAGA_VOLUNTARIA_LABELS: Record<StatusVagaVoluntaria, string> = {
+  aberta: 'Aguardando voluntário',
+  preenchida: 'Preenchida por voluntário',
+  expirada_compulsoria: 'Prazo esgotado — escalada compulsoriamente',
+};
+
+export interface VagaVoluntariaExtraordinaria {
+  id: string;
+  ubmId: string;
+  /** Id de `FuncaoUbm`. */
+  funcao: string;
+  data: string; // yyyy-MM-dd do serviço
+  motivo: string;
+  /** yyyy-MM-dd — até quando o sistema aceita voluntários pra essa vaga. */
+  prazo: string;
+  status: StatusVagaVoluntaria;
+  /** Pool notificado ao disparar (elegíveis: função, não afastados, sob o teto mensal). */
+  candidatosElegiveisIds: string[];
+  /** Ordem de quem se candidatou (o primeiro elegível já fecha a vaga). */
+  voluntariosIds: string[];
+  /** "Mais folgado" no momento do disparo — preservado pra estatística mesmo se outro voluntário assumir. */
+  militarSugeridoId?: string;
+  /** Quem efetivamente assumiu — por voluntariado ou, esgotado o prazo, compulsoriamente. */
+  militarId?: string;
+  escalaExtraordinariaId?: string;
+  criadoPorId: string;
+  criado_em: string;
+  resolvido_em?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +509,8 @@ export type TipoAlerta =
   | 'alteracao_diferenciada'
   | 'solicitacao_reforco'
   | 'reforco_atendido'
+  | 'vaga_voluntaria_disponivel'
+  | 'vaga_voluntaria_resolvida'
   | 'geral';
 
 export interface Alerta {

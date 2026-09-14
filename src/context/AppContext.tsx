@@ -40,7 +40,15 @@ import {
   requireFirebaseAuth,
 } from '../lib/firebase';
 import { enviarEmail } from '../lib/emailService';
-import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, gerarEscalaOrdinaria, sugerirMilitarExtraordinario } from '../lib/escala';
+import {
+  LIMITE_EXTRAORDINARIAS_POR_MES,
+  estaAfastado,
+  extraordinariasNoMes,
+  gerarEscalaOrdinaria,
+  militaresDaFuncao,
+  ordenarCandidatosExtraordinario,
+  sugerirMilitarExtraordinario,
+} from '../lib/escala';
 import { buscarMilitarPorMatricula, normalizarMatricula } from '../lib/planilhaEfetivo';
 import type { LinhaMilitar } from '../lib/csvMilitares';
 import {
@@ -62,9 +70,11 @@ import {
   SolicitacaoServico,
   StatusSolicitacaoReforco,
   StatusSolicitacaoServico,
+  StatusVagaVoluntaria,
   TipoEscalaServico,
   Ubm,
   Usuario,
+  VagaVoluntariaExtraordinaria,
 } from '../types';
 
 interface AppContextData {
@@ -76,6 +86,7 @@ interface AppContextData {
   escalasOrdinarias: EscalaOrdinaria[];
   escalasExtraordinarias: EscalaExtraordinaria[];
   escalasDiferenciadas: EscalaDiferenciada[];
+  vagasVoluntariasExtraordinarias: VagaVoluntariaExtraordinaria[];
   afastamentos: Afastamento[];
   presencas: RegistroPresenca[];
   solicitacoesServico: SolicitacaoServico[];
@@ -137,6 +148,9 @@ interface AppContextData {
 
   criarEscalaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; militarIdEscolhido?: string }) => Promise<string>;
   alterarMilitarExtraordinaria: (id: string, militarId: string) => Promise<void>;
+  dispararVagaVoluntariaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; prazo: string }) => Promise<string>;
+  voluntariarParaVaga: (vagaId: string) => Promise<void>;
+  resolverVagaCompulsoriamente: (vagaId: string, militarIdEscolhido?: string) => Promise<void>;
 
   /** Só o escalante cadastra — cria o registro e já espelha em EscalaOrdinaria (origem 'diferenciada'). */
   criarEscalaDiferenciada: (dados: { militarId: string; ubmId: string; funcao: string; data: string; observacao?: string }) => Promise<void>;
@@ -305,6 +319,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const escalasOrdinarias = useColecao<EscalaOrdinaria>('escalas_ordinarias', isAuthenticated);
   const escalasExtraordinarias = useColecao<EscalaExtraordinaria>('escalas_extraordinarias', isAuthenticated);
   const escalasDiferenciadas = useColecao<EscalaDiferenciada>('escalas_diferenciadas', isAuthenticated);
+  const vagasVoluntariasExtraordinarias = useColecao<VagaVoluntariaExtraordinaria>('vagas_voluntarias_extraordinarias', isAuthenticated);
   const afastamentos = useColecao<Afastamento>('afastamentos', isAuthenticated);
   const presencas = useColecao<RegistroPresenca>('presencas', isAuthenticated);
   const solicitacoesServico = useColecao<SolicitacaoServico>('solicitacoes_servico', isAuthenticated);
@@ -814,6 +829,191 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [escalasExtraordinarias],
   );
 
+  /**
+   * Dispara uma vaga extraordinária pro efetivo elegível se voluntariar, com
+   * prazo — em vez de já escalar compulsoriamente. Todo elegível (função,
+   * disponível na data, sob o teto mensal) recebe alerta; o "mais folgado" do
+   * momento fica registrado (`militarSugeridoId`) só pra estatística, mesmo
+   * que quem se voluntarie depois seja outra pessoa.
+   */
+  const dispararVagaVoluntariaExtraordinaria = useCallback(
+    async (dados: { ubmId: string; funcao: string; data: string; motivo: string; prazo: string }) => {
+      const db = requireDb();
+      const elegiveis = militaresDaFuncao(militares, dados.ubmId, dados.funcao)
+        .filter((m) => !estaAfastado(m.id, dados.data, afastamentos))
+        .filter((m) => extraordinariasNoMes(m.id, dados.data, escalasExtraordinarias) < LIMITE_EXTRAORDINARIAS_POR_MES);
+      if (elegiveis.length === 0) {
+        throw new Error(
+          'Nenhum militar disponível nessa função para chamar (todos afastados ou já no teto de ' +
+            `${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês).`,
+        );
+      }
+      const sugerido = ordenarCandidatosExtraordinario({
+        ubmId: dados.ubmId,
+        funcao: dados.funcao,
+        data: dados.data,
+        militares,
+        afastamentos,
+        escalasOrdinarias,
+        extraordinariasAnteriores: escalasExtraordinarias,
+      })[0];
+
+      const ref = await addDoc(collection(db, 'vagas_voluntarias_extraordinarias'), {
+        ubmId: dados.ubmId,
+        funcao: dados.funcao,
+        data: dados.data,
+        motivo: dados.motivo,
+        prazo: dados.prazo,
+        status: 'aberta' as StatusVagaVoluntaria,
+        candidatosElegiveisIds: elegiveis.map((m) => m.id),
+        voluntariosIds: [],
+        militarSugeridoId: sugerido?.id,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      const usuariosElegiveis = usuarios.filter((u) => u.militarId && elegiveis.some((m) => m.id === u.militarId));
+      const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'Função removida';
+      await Promise.all(
+        usuariosElegiveis.map((u) =>
+          notificar(
+            u.id,
+            'vaga_voluntaria_disponivel',
+            `Escala extraordinária disponível pra voluntariado: ${funcaoNome} em ${dados.data}. Prazo pra se voluntariar: ${dados.prazo}.`,
+            '/sistema/escala',
+          ),
+        ),
+      );
+      return ref.id;
+    },
+    [militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
+  );
+
+  /**
+   * Voluntariado: o primeiro elegível a se candidatar já fecha a vaga — sem
+   * esperar prazo nem outros voluntários. A vaga é atualizada ANTES de criar
+   * a escala definitiva; se outra pessoa já tiver fechado a vaga entre a
+   * leitura e a gravação, esse update é rejeitado pela regra (`status`
+   * deixou de ser 'aberta') e a escala nunca chega a ser criada — evita
+   * duplicar a vaga entre dois voluntários simultâneos.
+   */
+  const voluntariarParaVaga = useCallback(
+    async (vagaId: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasExtraordinarias.find((v) => v.id === vagaId);
+      const militarId = usuarioAtual?.militarId;
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (!militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
+      if (vaga.status !== 'aberta') throw new Error('Essa vaga já foi preenchida.');
+      if (!vaga.candidatosElegiveisIds.includes(militarId)) {
+        throw new Error('Você não está na lista de elegíveis pra essa vaga.');
+      }
+      if (extraordinariasNoMes(militarId, vaga.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
+        throw new Error(`Você já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
+      }
+
+      const novaEscalaRef = doc(collection(db, 'escalas_extraordinarias'));
+      try {
+        await updateDoc(doc(db, 'vagas_voluntarias_extraordinarias', vagaId), {
+          status: 'preenchida' as StatusVagaVoluntaria,
+          militarId,
+          voluntariosIds: [...vaga.voluntariosIds, militarId],
+          escalaExtraordinariaId: novaEscalaRef.id,
+          resolvido_em: new Date().toISOString(),
+        });
+      } catch {
+        throw new Error('Alguém já se voluntariou primeiro pra essa vaga.');
+      }
+
+      await setDoc(novaEscalaRef, {
+        ubmId: vaga.ubmId,
+        funcao: vaga.funcao,
+        data: vaga.data,
+        motivo: vaga.motivo,
+        militarSugeridoId: vaga.militarSugeridoId ?? militarId,
+        militarId,
+        vagaVoluntariaId: vagaId,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      const gestaoDaUbm = usuarios.filter(
+        (u) => u.ubmId === vaga.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+      );
+      const funcaoNome = funcoes.find((f) => f.id === vaga.funcao)?.nome ?? 'Função removida';
+      await notificar(
+        usuarioAtual!.id,
+        'vaga_voluntaria_resolvida',
+        `Você se voluntariou e foi confirmado pra escala extraordinária de ${funcaoNome} em ${vaga.data}.`,
+        '/sistema/escala',
+      );
+      await Promise.all(
+        gestaoDaUbm.map((u) =>
+          notificar(
+            u.id,
+            'vaga_voluntaria_resolvida',
+            `A vaga de ${funcaoNome} em ${vaga.data} foi preenchida por voluntariado.`,
+            '/sistema/escala',
+          ),
+        ),
+      );
+    },
+    [vagasVoluntariasExtraordinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
+  );
+
+  /**
+   * Prazo esgotado sem voluntários: o escalante resolve compulsoriamente —
+   * mesmo motor de sugestão de sempre (ou escolha manual dentre os
+   * elegíveis), respeitando o mesmo teto mensal.
+   */
+  const resolverVagaCompulsoriamente = useCallback(
+    async (vagaId: string, militarIdEscolhido?: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasExtraordinarias.find((v) => v.id === vagaId);
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (vaga.status !== 'aberta') throw new Error('Essa vaga já foi resolvida.');
+
+      const militarFinal = militarIdEscolhido ?? vaga.militarSugeridoId;
+      if (!militarFinal) {
+        throw new Error('Nenhum militar disponível pra escalar compulsoriamente nessa função.');
+      }
+      if (extraordinariasNoMes(militarFinal, vaga.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
+        throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
+      }
+
+      const novaEscalaRef = doc(collection(db, 'escalas_extraordinarias'));
+      await updateDoc(doc(db, 'vagas_voluntarias_extraordinarias', vagaId), {
+        status: 'expirada_compulsoria' as StatusVagaVoluntaria,
+        militarId: militarFinal,
+        escalaExtraordinariaId: novaEscalaRef.id,
+        resolvido_em: new Date().toISOString(),
+      });
+      await setDoc(novaEscalaRef, {
+        ubmId: vaga.ubmId,
+        funcao: vaga.funcao,
+        data: vaga.data,
+        motivo: vaga.motivo,
+        militarSugeridoId: vaga.militarSugeridoId ?? militarFinal,
+        militarId: militarFinal,
+        vagaVoluntariaId: vagaId,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      const usuarioMilitar = usuarios.find((u) => u.militarId === militarFinal);
+      const funcaoNome = funcoes.find((f) => f.id === vaga.funcao)?.nome ?? 'Função removida';
+      if (usuarioMilitar) {
+        await notificar(
+          usuarioMilitar.id,
+          'vaga_voluntaria_resolvida',
+          `Ninguém se voluntariou a tempo — você foi escalado compulsoriamente pra ${funcaoNome} em ${vaga.data}.`,
+          '/sistema/escala',
+        );
+      }
+    },
+    [vagasVoluntariasExtraordinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
+  );
+
   // --- Solicitação de Reforço (CRB/COP -> UBM) ------------------------------
   const criarSolicitacaoReforco = useCallback(
     async (dados: { comandoId: string; ubmId: string; funcao: string; postoDesejado?: string; data: string; motivo: string }) => {
@@ -1217,6 +1417,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       escalasOrdinarias,
       escalasExtraordinarias,
       escalasDiferenciadas,
+      vagasVoluntariasExtraordinarias,
       afastamentos,
       presencas,
       solicitacoesServico,
@@ -1256,6 +1457,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
+      dispararVagaVoluntariaExtraordinaria,
+      voluntariarParaVaga,
+      resolverVagaCompulsoriamente,
       criarEscalaDiferenciada,
       atualizarEscalaDiferenciada,
       removerEscalaDiferenciada,
@@ -1280,6 +1484,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       escalasOrdinarias,
       escalasExtraordinarias,
       escalasDiferenciadas,
+      vagasVoluntariasExtraordinarias,
       afastamentos,
       presencas,
       solicitacoesServico,
@@ -1318,6 +1523,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
+      dispararVagaVoluntariaExtraordinaria,
+      voluntariarParaVaga,
+      resolverVagaCompulsoriamente,
       criarEscalaDiferenciada,
       atualizarEscalaDiferenciada,
       removerEscalaDiferenciada,

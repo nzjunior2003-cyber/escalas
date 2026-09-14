@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarDays, Plus, Sparkles, Lock } from 'lucide-react';
+import { CalendarDays, Plus, Sparkles, Lock, Megaphone, HandHeart } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, semanaInicioDe } from '../../lib/escala';
-import { temPapel } from '../../types';
+import { STATUS_VAGA_VOLUNTARIA_LABELS, temPapel } from '../../types';
 
 type Aba = 'ordinaria' | 'extraordinaria' | 'diferenciada';
 type Granularidade = 'semanal' | 'mensal' | 'anual';
@@ -203,21 +203,48 @@ export default function Escala() {
 }
 
 function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante: boolean }) {
-  const { militares, funcoes, escalasExtraordinarias, fechamentosEscala, criarEscalaExtraordinaria, alterarMilitarExtraordinaria } = useApp();
+  const {
+    usuarioAtual,
+    militares,
+    funcoes,
+    escalasExtraordinarias,
+    fechamentosEscala,
+    vagasVoluntariasExtraordinarias,
+    criarEscalaExtraordinaria,
+    alterarMilitarExtraordinaria,
+    dispararVagaVoluntariaExtraordinaria,
+    voluntariarParaVaga,
+    resolverVagaCompulsoriamente,
+  } = useApp();
   const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
   const [form, setForm] = useState({ funcao: '', data: formatarDataISO(new Date()), motivo: '' });
   const [criando, setCriando] = useState(false);
+  const [formVaga, setFormVaga] = useState({ funcao: '', data: formatarDataISO(new Date()), motivo: '', prazo: formatarDataISO(new Date()) });
+  const [disparando, setDisparando] = useState(false);
+  const [processandoVagaId, setProcessandoVagaId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!form.funcao && funcoesDaUbm.length > 0) setForm((f) => ({ ...f, funcao: funcoesDaUbm[0].id }));
   }, [form.funcao, funcoesDaUbm]);
+  useEffect(() => {
+    if (!formVaga.funcao && funcoesDaUbm.length > 0) setFormVaga((f) => ({ ...f, funcao: funcoesDaUbm[0].id }));
+  }, [formVaga.funcao, funcoesDaUbm]);
 
   const doUbm = escalasExtraordinarias.filter((e) => e.ubmId === ubmId).sort((a, b) => b.data.localeCompare(a.data));
   const nomeDaFuncao = (funcaoId: string) => funcoes.find((f) => f.id === funcaoId)?.nome ?? 'Função removida';
+  const nomeMilitar = (id?: string) => militares.find((m) => m.id === id)?.nome ?? '—';
   const estaTravada = (data: string) => {
     const docId = `${ubmId}_extraordinaria_${semanaInicioDe(data)}`;
     return fechamentosEscala.find((f) => f.id === docId)?.travada ?? false;
   };
+
+  const hoje = formatarDataISO(new Date());
+  const meuMilitarId = usuarioAtual?.militarId;
+  const vagasDaUbm = vagasVoluntariasExtraordinarias
+    .filter((v) => v.ubmId === ubmId)
+    .sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+  const vagasAbertas = vagasDaUbm.filter((v) => v.status === 'aberta');
+  const vagasResolvidas = vagasDaUbm.filter((v) => v.status !== 'aberta').slice(0, 15);
 
   const handleCriar = async (e: FormEvent) => {
     e.preventDefault();
@@ -232,29 +259,167 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
     }
   };
 
+  const handleDisparar = async (e: FormEvent) => {
+    e.preventDefault();
+    setDisparando(true);
+    try {
+      await dispararVagaVoluntariaExtraordinaria({ ubmId, ...formVaga });
+      setFormVaga({ funcao: funcoesDaUbm[0]?.id ?? '', data: formatarDataISO(new Date()), motivo: '', prazo: formatarDataISO(new Date()) });
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível disparar a vaga pra voluntariado.');
+    } finally {
+      setDisparando(false);
+    }
+  };
+
+  const handleVoluntariar = async (vagaId: string) => {
+    setProcessandoVagaId(vagaId);
+    try {
+      await voluntariarParaVaga(vagaId);
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível se voluntariar pra essa vaga.');
+    } finally {
+      setProcessandoVagaId(null);
+    }
+  };
+
+  const handleResolverCompulsorio = async (vagaId: string) => {
+    setProcessandoVagaId(vagaId);
+    try {
+      await resolverVagaCompulsoriamente(vagaId);
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível resolver essa vaga compulsoriamente.');
+    } finally {
+      setProcessandoVagaId(null);
+    }
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {isEscalante && (
-        <form onSubmit={handleCriar} className="bg-white p-4 rounded-lg border border-gray-200 flex flex-wrap gap-3 items-end">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
-            <select value={form.funcao} onChange={(e) => setForm({ ...form, funcao: e.target.value })} className="border border-gray-300 rounded-md text-sm py-2 px-3">
-              {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
-              {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
-            </select>
+        <div className="space-y-4">
+          <form onSubmit={handleDisparar} className="bg-white p-4 rounded-lg border border-gray-200 space-y-3">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+              <Megaphone className="w-4 h-4 text-red-600" /> Disparar vaga pra voluntários
+            </h3>
+            <p className="text-xs text-gray-500">
+              Extraordinária é voluntária por natureza. O efetivo elegível recebe alerta com prazo; assim que alguém se
+              voluntariar, o sistema já confirma. Se ninguém se voluntariar até o prazo, você resolve compulsoriamente.
+            </p>
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-3 sm:items-end">
+              <div className="min-w-0 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
+                <select value={formVaga.funcao} onChange={(e) => setFormVaga({ ...formVaga, funcao: e.target.value })} className="w-full sm:w-auto max-w-full border border-gray-300 rounded-md text-sm py-2 px-3">
+                  {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+                  {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                </select>
+              </div>
+              <div className="min-w-0 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Data do serviço</label>
+                <input type="date" value={formVaga.data} onChange={(e) => setFormVaga({ ...formVaga, data: e.target.value })} className="w-full sm:w-auto border border-gray-300 rounded-md text-sm py-2 px-3" />
+              </div>
+              <div className="min-w-0 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Prazo pra se voluntariar</label>
+                <input type="date" value={formVaga.prazo} onChange={(e) => setFormVaga({ ...formVaga, prazo: e.target.value })} className="w-full sm:w-auto border border-gray-300 rounded-md text-sm py-2 px-3" />
+              </div>
+              <div className="min-w-0 w-full sm:flex-1">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Motivo (ex.: reforço para evento)</label>
+                <input required value={formVaga.motivo} onChange={(e) => setFormVaga({ ...formVaga, motivo: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
+              </div>
+              <button type="submit" disabled={disparando} className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50">
+                <Megaphone className="-ml-1 mr-2 h-4 w-4" /> {disparando ? 'Disparando...' : 'Disparar vaga'}
+              </button>
+            </div>
+          </form>
+
+          <details className="bg-white p-4 rounded-lg border border-gray-200">
+            <summary className="text-sm font-semibold text-gray-700 cursor-pointer">Escalar direto, sem passar por voluntariado</summary>
+            <form onSubmit={handleCriar} className="mt-3 grid grid-cols-1 sm:flex sm:flex-wrap gap-3 sm:items-end">
+              <div className="min-w-0 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
+                <select value={form.funcao} onChange={(e) => setForm({ ...form, funcao: e.target.value })} className="w-full sm:w-auto border border-gray-300 rounded-md text-sm py-2 px-3">
+                  {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+                  {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                </select>
+              </div>
+              <div className="min-w-0 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Data</label>
+                <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} className="w-full sm:w-auto border border-gray-300 rounded-md text-sm py-2 px-3" />
+              </div>
+              <div className="min-w-0 w-full sm:flex-1">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Motivo (ex.: reforço para evento)</label>
+                <input required value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
+              </div>
+              <button type="submit" disabled={criando} className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-gray-700 hover:bg-gray-800 disabled:opacity-50">
+                <Plus className="-ml-1 mr-2 h-4 w-4" /> Sugerir e cadastrar
+              </button>
+            </form>
+          </details>
+        </div>
+      )}
+
+      {vagasAbertas.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+            <HandHeart className="w-4 h-4 text-emerald-600" /> Vagas aguardando voluntário
+          </h3>
+          <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+            {vagasAbertas.map((v) => {
+              const prazoVencido = v.prazo < hoje;
+              const souElegivel = !!meuMilitarId && v.candidatosElegiveisIds.includes(meuMilitarId);
+              return (
+                <div key={v.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-gray-900">{v.data} — {nomeDaFuncao(v.funcao)}</div>
+                    <div className="text-gray-500">{v.motivo}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      Prazo pra voluntariar: {v.prazo}{prazoVencido && <span className="text-amber-600 font-medium"> · esgotado</span>}
+                    </div>
+                  </div>
+                  <div className="shrink-0 self-end sm:self-auto">
+                    {souElegivel && !prazoVencido && (
+                      <button
+                        onClick={() => handleVoluntariar(v.id)}
+                        disabled={processandoVagaId === v.id}
+                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        <HandHeart className="-ml-1 mr-1.5 h-3.5 w-3.5" /> Quero me voluntariar
+                      </button>
+                    )}
+                    {isEscalante && prazoVencido && (
+                      <button
+                        onClick={() => handleResolverCompulsorio(v.id)}
+                        disabled={processandoVagaId === v.id}
+                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        Prazo esgotado — escalar compulsoriamente
+                      </button>
+                    )}
+                    {!souElegivel && !isEscalante && (
+                      <span className="text-xs text-gray-400">Aguardando voluntário</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Data</label>
-            <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} className="border border-gray-300 rounded-md text-sm py-2 px-3" />
+        </div>
+      )}
+
+      {isEscalante && vagasResolvidas.length > 0 && (
+        <details className="bg-white rounded-lg border border-gray-200">
+          <summary className="px-4 py-3 text-sm font-semibold text-gray-700 cursor-pointer">Histórico de vagas voluntárias resolvidas</summary>
+          <div className="divide-y divide-gray-100 border-t border-gray-100">
+            {vagasResolvidas.map((v) => (
+              <div key={v.id} className="flex flex-col sm:flex-row sm:items-center gap-1 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-gray-900">{v.data} — {nomeDaFuncao(v.funcao)}</div>
+                  <div className="text-gray-500">{STATUS_VAGA_VOLUNTARIA_LABELS[v.status]} · {nomeMilitar(v.militarId)}</div>
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs font-medium text-gray-500 mb-1">Motivo (ex.: reforço para evento)</label>
-            <input required value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
-          </div>
-          <button type="submit" disabled={criando} className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50">
-            <Plus className="-ml-1 mr-2 h-4 w-4" /> Sugerir e cadastrar
-          </button>
-        </form>
+        </details>
       )}
 
       <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">

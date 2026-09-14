@@ -200,16 +200,19 @@ export function extraordinariasNoMes(militarId: string, data: string, extraordin
 }
 
 /**
- * Sugere o militar para uma escala extraordinária: dentro do rodízio da
- * função solicitada, prioriza quem está mais "folgado" — considerando o
- * total de serviços já feitos (ordinária + extraordinária juntas, não só
- * extraordinária) —, e nunca sugere quem já bateu o teto mensal de
- * `LIMITE_EXTRAORDINARIAS_POR_MES` reforços (esse sim conta só
- * extraordinária, e em qualquer função — é limite de sobrecarga do
- * militar, não da função). Estatística de recorrência baseada em
- * `militarSugeridoId`, não no `militarId` final — ver nota do módulo.
+ * Ordena os elegíveis pra uma escala extraordinária (função + data): dentro
+ * do rodízio da função solicitada, prioriza quem está mais "folgado" —
+ * considerando o total de serviços já feitos (ordinária + extraordinária
+ * juntas, não só extraordinária) —, desempatando por quem está há mais tempo
+ * sem reforço extraordinário. Nunca inclui quem já bateu o teto mensal de
+ * `LIMITE_EXTRAORDINARIAS_POR_MES` reforços (esse sim conta só extraordinária,
+ * e em qualquer função — é limite de sobrecarga do militar, não da função).
+ *
+ * Usada tanto pra sugestão automática (índice 0 — ver `sugerirMilitarExtraordinario`)
+ * quanto pra decidir, dentre vários voluntários de uma mesma vaga, quem
+ * assume: o mais bem-ranqueado (mesma prioridade de sempre) entre eles.
  */
-export function sugerirMilitarExtraordinario(params: {
+export function ordenarCandidatosExtraordinario(params: {
   ubmId: string;
   funcao: string;
   data: string;
@@ -217,12 +220,12 @@ export function sugerirMilitarExtraordinario(params: {
   afastamentos: Afastamento[];
   escalasOrdinarias: EscalaOrdinaria[];
   extraordinariasAnteriores: EscalaExtraordinaria[];
-}): Militar | null {
+}): Militar[] {
   const { ubmId, funcao, data, afastamentos, escalasOrdinarias, extraordinariasAnteriores } = params;
   const elegiveis = militaresDaFuncao(params.militares, ubmId, funcao)
     .filter((m) => !estaAfastado(m.id, data, afastamentos))
     .filter((m) => extraordinariasNoMes(m.id, data, extraordinariasAnteriores) < LIMITE_EXTRAORDINARIAS_POR_MES);
-  if (elegiveis.length === 0) return null;
+  if (elegiveis.length === 0) return [];
 
   const ultimaVezPorMilitar = new Map<string, string>();
   for (const e of extraordinariasAnteriores) {
@@ -239,7 +242,7 @@ export function sugerirMilitarExtraordinario(params: {
   // "última vez" pra frente, como se tivessem sido servidos naquele meio
   // tempo). Missão externa não desconta nada — o tempo afastado nessa
   // continua contando a favor da prioridade de recuperação depois.
-  const comOrdenacao = elegiveis
+  return elegiveis
     .map((m) => {
       const servicosOrdinaria = escalasOrdinarias.filter(
         (e) => e.ubmId === ubmId && e.funcao === funcao && e.militarId === m.id && e.data <= data,
@@ -261,9 +264,26 @@ export function sugerirMilitarExtraordinario(params: {
       const diferenca = a.totalServicos - b.totalServicos;
       if (diferenca !== 0) return diferenca;
       return a.ultimaData.localeCompare(b.ultimaData);
-    });
+    })
+    .map((c) => c.militar);
+}
 
-  return comOrdenacao[0]?.militar ?? null;
+/**
+ * Sugestão automática (índice 0 de `ordenarCandidatosExtraordinario`) —
+ * mantida como função separada porque é o caso de uso mais comum (criação
+ * direta e resolução compulsória). Estatística de recorrência baseada em
+ * `militarSugeridoId`, não no `militarId` final — ver nota do módulo.
+ */
+export function sugerirMilitarExtraordinario(params: {
+  ubmId: string;
+  funcao: string;
+  data: string;
+  militares: Militar[];
+  afastamentos: Afastamento[];
+  escalasOrdinarias: EscalaOrdinaria[];
+  extraordinariasAnteriores: EscalaExtraordinaria[];
+}): Militar | null {
+  return ordenarCandidatosExtraordinario(params)[0] ?? null;
 }
 
 /** Contagem de reforços extraordinários por militar (estatística — seção 8). */
