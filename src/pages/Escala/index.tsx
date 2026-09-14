@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarDays, Plus, Sparkles, Lock, Megaphone, HandHeart } from 'lucide-react';
+import { CalendarDays, Plus, Sparkles, Lock, Megaphone, HandHeart, Trash2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, ordenarCandidatosExtraordinario, semanaInicioDe } from '../../lib/escala';
 import { STATUS_VAGA_VOLUNTARIA_LABELS, temPapel } from '../../types';
@@ -214,6 +214,7 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
     vagasVoluntariasExtraordinarias,
     criarEscalaExtraordinaria,
     alterarMilitarExtraordinaria,
+    deleteEscalaExtraordinaria,
     dispararVagaVoluntariaExtraordinaria,
     voluntariarParaVaga,
     resolverVagaCompulsoriamente,
@@ -479,6 +480,15 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
               }
             };
 
+            const handleRemover = async () => {
+              if (!confirm('Remover essa escala extraordinária? Essa ação não pode ser desfeita.')) return;
+              try {
+                await deleteEscalaExtraordinaria(e.id);
+              } catch (erro) {
+                alert(erro instanceof Error ? erro.message : 'Não foi possível remover essa escala.');
+              }
+            };
+
             return (
               <div key={e.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 text-sm">
                 <div className="min-w-0 flex-1">
@@ -486,7 +496,7 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
                   <div className="text-gray-500">{e.motivo}</div>
                   <div className="text-xs text-gray-400 mt-0.5">Sugerido: {sugerido?.nome ?? '—'}</div>
                 </div>
-                <div className="shrink-0">
+                <div className="shrink-0 flex items-center gap-2">
                   {isEscalante && !travada ? (
                     <select value={e.militarId} onChange={(ev) => handleAlterar(ev.target.value)} className="border border-gray-200 rounded text-sm max-w-full">
                       {candidatos.map((m) => (
@@ -502,7 +512,12 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
                     </span>
                   )}
                   {e.militarId !== e.militarSugeridoId && (
-                    <span className="ml-2 text-[10px] uppercase text-amber-600 font-semibold">alterado</span>
+                    <span className="text-[10px] uppercase text-amber-600 font-semibold">alterado</span>
+                  )}
+                  {isEscalante && !travada && (
+                    <button onClick={handleRemover} title="Remover" className="p-1 -m-1 text-gray-300 hover:text-red-600">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   )}
                 </div>
               </div>

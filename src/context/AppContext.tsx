@@ -147,6 +147,7 @@ interface AppContextData {
 
   criarEscalaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; militarIdEscolhido?: string }) => Promise<string>;
   alterarMilitarExtraordinaria: (id: string, militarId: string) => Promise<void>;
+  deleteEscalaExtraordinaria: (id: string) => Promise<void>;
   dispararVagaVoluntariaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; prazo: string; quantidade: number }) => Promise<string>;
   voluntariarParaVaga: (vagaId: string) => Promise<void>;
   resolverVagaCompulsoriamente: (vagaId: string) => Promise<void>;
@@ -194,6 +195,7 @@ interface AppContextData {
   responderSolicitacaoReforco: (id: string, decisao: { atender: boolean; militarId?: string }) => Promise<void>;
 
   marcarAlertaLida: (id: string) => Promise<void>;
+  deleteAlerta: (id: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextData>({} as AppContextData);
@@ -828,6 +830,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [escalasExtraordinarias],
   );
 
+  const deleteEscalaExtraordinaria = useCallback(async (id: string) => {
+    const db = requireDb();
+    await deleteDoc(doc(db, 'escalas_extraordinarias', id));
+  }, []);
+
   /**
    * Dispara uma vaga extraordinária (podendo pedir mais de um militar) pro
    * efetivo elegível se voluntariar, com prazo — em vez de já escalar
@@ -1422,6 +1429,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     await updateDoc(doc(db, 'alertas', id), { lida: true });
   }, []);
 
+  const deleteAlerta = useCallback(async (id: string) => {
+    const db = requireDb();
+    await deleteDoc(doc(db, 'alertas', id));
+  }, []);
+
   const valor = useMemo<AppContextData>(
     () => ({
       ubms,
@@ -1472,6 +1484,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
+      deleteEscalaExtraordinaria,
       dispararVagaVoluntariaExtraordinaria,
       voluntariarParaVaga,
       resolverVagaCompulsoriamente,
@@ -1489,6 +1502,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       criarSolicitacaoReforco,
       responderSolicitacaoReforco,
       marcarAlertaLida,
+      deleteAlerta,
     }),
     [
       ubms,
@@ -1538,6 +1552,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
+      deleteEscalaExtraordinaria,
       dispararVagaVoluntariaExtraordinaria,
       voluntariarParaVaga,
       resolverVagaCompulsoriamente,
@@ -1555,6 +1570,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       criarSolicitacaoReforco,
       responderSolicitacaoReforco,
       marcarAlertaLida,
+      deleteAlerta,
     ],
   );
 

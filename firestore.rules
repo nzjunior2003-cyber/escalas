@@ -250,6 +250,7 @@ service cloud.firestore {
       allow read: if ativo() && resource.data.usuarioId == request.auth.uid;
       allow create: if ativo();
       allow update: if ativo() && resource.data.usuarioId == request.auth.uid;
+      allow delete: if ativo() && resource.data.usuarioId == request.auth.uid;
     }
 
     // Log de acesso: criação aberta (login mal-sucedido acontece antes de
