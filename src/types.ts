@@ -188,22 +188,33 @@ export interface EscalaExtraordinaria {
 // Vaga voluntária de escala extraordinária
 //
 // Extraordinária é voluntária por natureza — só vira escalação compulsória se
-// ninguém se voluntariar. O escalante dispara a vaga (função + data + motivo)
-// com um prazo pro efetivo elegível se voluntariar; todo mundo elegível recebe
-// alerta. Assim que alguém se voluntaria, o sistema já confirma — sem esperar
-// os demais nem o prazo. Só se o prazo vencer sem ninguém se voluntariar é que
-// o escalante resolve compulsoriamente (mesmo motor de sugestão de sempre).
-// Em qualquer um dos dois casos, `militarSugeridoId` (quem o algoritmo de
-// equidade apontaria — o "mais folgado") fica registrado pra estatística,
-// mesmo que quem tenha se voluntariado seja outra pessoa — a mesma lógica já
-// usada quando o escalante altera manualmente uma extraordinária.
+// não aparecerem voluntários suficientes. O escalante dispara a vaga (função
+// + data + motivo + quantidade de militares necessários) com um prazo pro
+// efetivo elegível se voluntariar; todo mundo elegível recebe alerta. Cada
+// voluntário que aparece já ocupa uma das `quantidade` posições na hora —
+// sem esperar os demais nem o prazo — até a vaga ficar cheia.
+//
+// Elegibilidade pra essa vaga (`candidatosElegiveisIds`, calculada no
+// disparo): função ativa na UBM, sem afastamento na data, sob o teto mensal
+// de `LIMITE_EXTRAORDINARIAS_POR_MES`, e — o requisito central — pelo menos
+// 24h de folga desde o serviço (ordinária ou extraordinária) anterior (ver
+// `temFolga24hAntes`).
+//
+// Se o prazo vencer com posições sobrando, o escalante resolve
+// compulsoriamente as que faltam: pega, dentre os elegíveis que não se
+// voluntariaram, os mais bem-ranqueados pelo motor de equidade de sempre
+// (menos serviços = "mais folgado" primeiro; empatados em folga, desempata
+// por hierarquia — mais moderno primeiro: CB/SD antes de Sargento/Subtenente
+// — e ainda empatado, por há-mais-tempo-sem-reforço). A hierarquia NUNCA
+// decide sozinha: só entra quando duas ou mais pessoas já estão empatadas em
+// folga — entre folga e hierarquia divergentes, a folga sempre vence.
 // ---------------------------------------------------------------------------
 export type StatusVagaVoluntaria = 'aberta' | 'preenchida' | 'expirada_compulsoria';
 
 export const STATUS_VAGA_VOLUNTARIA_LABELS: Record<StatusVagaVoluntaria, string> = {
   aberta: 'Aguardando voluntário',
-  preenchida: 'Preenchida por voluntário',
-  expirada_compulsoria: 'Prazo esgotado — escalada compulsoriamente',
+  preenchida: 'Preenchida por voluntário(s)',
+  expirada_compulsoria: 'Prazo esgotado — completada compulsoriamente',
 };
 
 export interface VagaVoluntariaExtraordinaria {
@@ -215,16 +226,15 @@ export interface VagaVoluntariaExtraordinaria {
   motivo: string;
   /** yyyy-MM-dd — até quando o sistema aceita voluntários pra essa vaga. */
   prazo: string;
+  /** Quantos militares essa vaga precisa (pode ser mais de um). */
+  quantidade: number;
   status: StatusVagaVoluntaria;
-  /** Pool notificado ao disparar (elegíveis: função, não afastados, sob o teto mensal). */
+  /** Pool notificado ao disparar — únicos elegíveis a se voluntariar. */
   candidatosElegiveisIds: string[];
-  /** Ordem de quem se candidatou (o primeiro elegível já fecha a vaga). */
+  /** Ordem de quem se voluntariou (máximo `quantidade`). */
   voluntariosIds: string[];
-  /** "Mais folgado" no momento do disparo — preservado pra estatística mesmo se outro voluntário assumir. */
-  militarSugeridoId?: string;
-  /** Quem efetivamente assumiu — por voluntariado ou, esgotado o prazo, compulsoriamente. */
-  militarId?: string;
-  escalaExtraordinariaId?: string;
+  /** Preenchido só quando o prazo vence com posições sobrando — quem completou compulsoriamente. */
+  militaresCompulsoriosIds?: string[];
   criadoPorId: string;
   criado_em: string;
   resolvido_em?: string;

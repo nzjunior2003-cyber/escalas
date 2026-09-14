@@ -42,12 +42,11 @@ import {
 import { enviarEmail } from '../lib/emailService';
 import {
   LIMITE_EXTRAORDINARIAS_POR_MES,
-  estaAfastado,
   extraordinariasNoMes,
   gerarEscalaOrdinaria,
-  militaresDaFuncao,
   ordenarCandidatosExtraordinario,
   sugerirMilitarExtraordinario,
+  temFolga24hAntes,
 } from '../lib/escala';
 import { buscarMilitarPorMatricula, normalizarMatricula } from '../lib/planilhaEfetivo';
 import type { LinhaMilitar } from '../lib/csvMilitares';
@@ -148,9 +147,9 @@ interface AppContextData {
 
   criarEscalaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; militarIdEscolhido?: string }) => Promise<string>;
   alterarMilitarExtraordinaria: (id: string, militarId: string) => Promise<void>;
-  dispararVagaVoluntariaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; prazo: string }) => Promise<string>;
+  dispararVagaVoluntariaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; prazo: string; quantidade: number }) => Promise<string>;
   voluntariarParaVaga: (vagaId: string) => Promise<void>;
-  resolverVagaCompulsoriamente: (vagaId: string, militarIdEscolhido?: string) => Promise<void>;
+  resolverVagaCompulsoriamente: (vagaId: string) => Promise<void>;
 
   /** Só o escalante cadastra — cria o registro e já espelha em EscalaOrdinaria (origem 'diferenciada'). */
   criarEscalaDiferenciada: (dados: { militarId: string; ubmId: string; funcao: string; data: string; observacao?: string }) => Promise<void>;
@@ -830,25 +829,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   /**
-   * Dispara uma vaga extraordinária pro efetivo elegível se voluntariar, com
-   * prazo — em vez de já escalar compulsoriamente. Todo elegível (função,
-   * disponível na data, sob o teto mensal) recebe alerta; o "mais folgado" do
-   * momento fica registrado (`militarSugeridoId`) só pra estatística, mesmo
-   * que quem se voluntarie depois seja outra pessoa.
+   * Dispara uma vaga extraordinária (podendo pedir mais de um militar) pro
+   * efetivo elegível se voluntariar, com prazo — em vez de já escalar
+   * compulsoriamente. Elegibilidade: função ativa, sem afastamento na data,
+   * sob o teto mensal e com 24h de folga desde o serviço anterior (ver nota
+   * em types.ts) — todo elegível recebe alerta.
    */
   const dispararVagaVoluntariaExtraordinaria = useCallback(
-    async (dados: { ubmId: string; funcao: string; data: string; motivo: string; prazo: string }) => {
+    async (dados: { ubmId: string; funcao: string; data: string; motivo: string; prazo: string; quantidade: number }) => {
       const db = requireDb();
-      const elegiveis = militaresDaFuncao(militares, dados.ubmId, dados.funcao)
-        .filter((m) => !estaAfastado(m.id, dados.data, afastamentos))
-        .filter((m) => extraordinariasNoMes(m.id, dados.data, escalasExtraordinarias) < LIMITE_EXTRAORDINARIAS_POR_MES);
-      if (elegiveis.length === 0) {
-        throw new Error(
-          'Nenhum militar disponível nessa função para chamar (todos afastados ou já no teto de ' +
-            `${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês).`,
-        );
-      }
-      const sugerido = ordenarCandidatosExtraordinario({
+      const elegiveis = ordenarCandidatosExtraordinario({
         ubmId: dados.ubmId,
         funcao: dados.funcao,
         data: dados.data,
@@ -856,7 +846,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         afastamentos,
         escalasOrdinarias,
         extraordinariasAnteriores: escalasExtraordinarias,
-      })[0];
+      });
+      if (elegiveis.length === 0) {
+        throw new Error(
+          'Nenhum militar disponível nessa função pra chamar (todos afastados, sem 24h de folga do serviço anterior, ou já no teto de ' +
+            `${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês).`,
+        );
+      }
 
       const ref = await addDoc(collection(db, 'vagas_voluntarias_extraordinarias'), {
         ubmId: dados.ubmId,
@@ -864,22 +860,23 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         data: dados.data,
         motivo: dados.motivo,
         prazo: dados.prazo,
+        quantidade: dados.quantidade,
         status: 'aberta' as StatusVagaVoluntaria,
         candidatosElegiveisIds: elegiveis.map((m) => m.id),
         voluntariosIds: [],
-        militarSugeridoId: sugerido?.id,
         criadoPorId: usuarioAtual?.id ?? '',
         criado_em: new Date().toISOString(),
       });
 
       const usuariosElegiveis = usuarios.filter((u) => u.militarId && elegiveis.some((m) => m.id === u.militarId));
       const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'Função removida';
+      const plural = dados.quantidade > 1 ? `${dados.quantidade} vagas` : '1 vaga';
       await Promise.all(
         usuariosElegiveis.map((u) =>
           notificar(
             u.id,
             'vaga_voluntaria_disponivel',
-            `Escala extraordinária disponível pra voluntariado: ${funcaoNome} em ${dados.data}. Prazo pra se voluntariar: ${dados.prazo}.`,
+            `Escala extraordinária disponível pra voluntariado: ${plural} de ${funcaoNome} em ${dados.data}. Prazo pra se voluntariar: ${dados.prazo}.`,
             '/sistema/escala',
           ),
         ),
@@ -890,12 +887,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   /**
-   * Voluntariado: o primeiro elegível a se candidatar já fecha a vaga — sem
-   * esperar prazo nem outros voluntários. A vaga é atualizada ANTES de criar
-   * a escala definitiva; se outra pessoa já tiver fechado a vaga entre a
-   * leitura e a gravação, esse update é rejeitado pela regra (`status`
-   * deixou de ser 'aberta') e a escala nunca chega a ser criada — evita
-   * duplicar a vaga entre dois voluntários simultâneos.
+   * Voluntariado: cada elegível que se candidata ocupa uma das `quantidade`
+   * posições na hora — sem esperar prazo nem os demais — até a vaga ficar
+   * cheia. A vaga é atualizada ANTES de criar a escala definitiva; se outra
+   * pessoa já tiver ocupado a última posição entre a leitura e a gravação,
+   * esse update é rejeitado pela regra (haveria mais voluntários que
+   * `quantidade`) e a escala nunca chega a ser criada.
    */
   const voluntariarParaVaga = useCallback(
     async (vagaId: string) => {
@@ -905,41 +902,41 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (!vaga) throw new Error('Vaga não encontrada.');
       if (!militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
       if (vaga.status !== 'aberta') throw new Error('Essa vaga já foi preenchida.');
+      if (vaga.voluntariosIds.length >= vaga.quantidade) throw new Error('Essa vaga já está completa.');
+      if (vaga.voluntariosIds.includes(militarId)) throw new Error('Você já se voluntariou pra essa vaga.');
       if (!vaga.candidatosElegiveisIds.includes(militarId)) {
         throw new Error('Você não está na lista de elegíveis pra essa vaga.');
       }
       if (extraordinariasNoMes(militarId, vaga.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
         throw new Error(`Você já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
       }
-
-      const novaEscalaRef = doc(collection(db, 'escalas_extraordinarias'));
-      try {
-        await updateDoc(doc(db, 'vagas_voluntarias_extraordinarias', vagaId), {
-          status: 'preenchida' as StatusVagaVoluntaria,
-          militarId,
-          voluntariosIds: [...vaga.voluntariosIds, militarId],
-          escalaExtraordinariaId: novaEscalaRef.id,
-          resolvido_em: new Date().toISOString(),
-        });
-      } catch {
-        throw new Error('Alguém já se voluntariou primeiro pra essa vaga.');
+      if (!temFolga24hAntes(militarId, vaga.data, escalasOrdinarias, escalasExtraordinarias)) {
+        throw new Error('Você não tem 24h de folga desde o serviço anterior pra essa data.');
       }
 
-      await setDoc(novaEscalaRef, {
+      const novosVoluntarios = [...vaga.voluntariosIds, militarId];
+      const novoStatus: StatusVagaVoluntaria = novosVoluntarios.length >= vaga.quantidade ? 'preenchida' : 'aberta';
+      try {
+        await updateDoc(doc(db, 'vagas_voluntarias_extraordinarias', vagaId), {
+          status: novoStatus,
+          voluntariosIds: novosVoluntarios,
+        });
+      } catch {
+        throw new Error('Essa vaga já foi preenchida por outros voluntários.');
+      }
+
+      await addDoc(collection(db, 'escalas_extraordinarias'), {
         ubmId: vaga.ubmId,
         funcao: vaga.funcao,
         data: vaga.data,
         motivo: vaga.motivo,
-        militarSugeridoId: vaga.militarSugeridoId ?? militarId,
+        militarSugeridoId: militarId,
         militarId,
         vagaVoluntariaId: vagaId,
         criadoPorId: usuarioAtual?.id ?? '',
         criado_em: new Date().toISOString(),
       });
 
-      const gestaoDaUbm = usuarios.filter(
-        (u) => u.ubmId === vaga.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
-      );
       const funcaoNome = funcoes.find((f) => f.id === vaga.funcao)?.nome ?? 'Função removida';
       await notificar(
         usuarioAtual!.id,
@@ -947,71 +944,89 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         `Você se voluntariou e foi confirmado pra escala extraordinária de ${funcaoNome} em ${vaga.data}.`,
         '/sistema/escala',
       );
-      await Promise.all(
-        gestaoDaUbm.map((u) =>
-          notificar(
-            u.id,
-            'vaga_voluntaria_resolvida',
-            `A vaga de ${funcaoNome} em ${vaga.data} foi preenchida por voluntariado.`,
-            '/sistema/escala',
+      if (novoStatus === 'preenchida') {
+        const gestaoDaUbm = usuarios.filter(
+          (u) => u.ubmId === vaga.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+        );
+        await Promise.all(
+          gestaoDaUbm.map((u) =>
+            notificar(
+              u.id,
+              'vaga_voluntaria_resolvida',
+              `A vaga de ${funcaoNome} em ${vaga.data} foi totalmente preenchida por voluntariado.`,
+              '/sistema/escala',
+            ),
           ),
-        ),
-      );
+        );
+      }
     },
-    [vagasVoluntariasExtraordinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
+    [vagasVoluntariasExtraordinarias, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
   );
 
   /**
-   * Prazo esgotado sem voluntários: o escalante resolve compulsoriamente —
-   * mesmo motor de sugestão de sempre (ou escolha manual dentre os
-   * elegíveis), respeitando o mesmo teto mensal.
+   * Prazo esgotado com posições sobrando: o escalante completa
+   * compulsoriamente as vagas que faltam — mesmo motor de equidade de
+   * sempre (menos serviços primeiro; empatados em folga, desempata por
+   * hierarquia — mais moderno primeiro — e ainda empatado, por
+   * há-mais-tempo-sem-reforço), dentre os elegíveis que não se voluntariaram.
    */
   const resolverVagaCompulsoriamente = useCallback(
-    async (vagaId: string, militarIdEscolhido?: string) => {
+    async (vagaId: string) => {
       const db = requireDb();
       const vaga = vagasVoluntariasExtraordinarias.find((v) => v.id === vagaId);
       if (!vaga) throw new Error('Vaga não encontrada.');
       if (vaga.status !== 'aberta') throw new Error('Essa vaga já foi resolvida.');
 
-      const militarFinal = militarIdEscolhido ?? vaga.militarSugeridoId;
-      if (!militarFinal) {
-        throw new Error('Nenhum militar disponível pra escalar compulsoriamente nessa função.');
-      }
-      if (extraordinariasNoMes(militarFinal, vaga.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
-        throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
-      }
+      const faltam = vaga.quantidade - vaga.voluntariosIds.length;
+      if (faltam <= 0) throw new Error('Essa vaga já está completa.');
 
-      const novaEscalaRef = doc(collection(db, 'escalas_extraordinarias'));
-      await updateDoc(doc(db, 'vagas_voluntarias_extraordinarias', vagaId), {
-        status: 'expirada_compulsoria' as StatusVagaVoluntaria,
-        militarId: militarFinal,
-        escalaExtraordinariaId: novaEscalaRef.id,
-        resolvido_em: new Date().toISOString(),
-      });
-      await setDoc(novaEscalaRef, {
+      const ranking = ordenarCandidatosExtraordinario({
         ubmId: vaga.ubmId,
         funcao: vaga.funcao,
         data: vaga.data,
-        motivo: vaga.motivo,
-        militarSugeridoId: vaga.militarSugeridoId ?? militarFinal,
-        militarId: militarFinal,
-        vagaVoluntariaId: vagaId,
-        criadoPorId: usuarioAtual?.id ?? '',
-        criado_em: new Date().toISOString(),
+        militares,
+        afastamentos,
+        escalasOrdinarias,
+        extraordinariasAnteriores: escalasExtraordinarias,
+      }).filter((m) => vaga.candidatosElegiveisIds.includes(m.id) && !vaga.voluntariosIds.includes(m.id));
+      const escolhidos = ranking.slice(0, faltam);
+      if (escolhidos.length < faltam) {
+        throw new Error('Não há militares elegíveis suficientes pra completar essa vaga compulsoriamente.');
+      }
+
+      await updateDoc(doc(db, 'vagas_voluntarias_extraordinarias', vagaId), {
+        status: 'expirada_compulsoria' as StatusVagaVoluntaria,
+        militaresCompulsoriosIds: escolhidos.map((m) => m.id),
+        resolvido_em: new Date().toISOString(),
       });
 
-      const usuarioMilitar = usuarios.find((u) => u.militarId === militarFinal);
       const funcaoNome = funcoes.find((f) => f.id === vaga.funcao)?.nome ?? 'Função removida';
-      if (usuarioMilitar) {
-        await notificar(
-          usuarioMilitar.id,
-          'vaga_voluntaria_resolvida',
-          `Ninguém se voluntariou a tempo — você foi escalado compulsoriamente pra ${funcaoNome} em ${vaga.data}.`,
-          '/sistema/escala',
-        );
-      }
+      await Promise.all(
+        escolhidos.map(async (m) => {
+          await addDoc(collection(db, 'escalas_extraordinarias'), {
+            ubmId: vaga.ubmId,
+            funcao: vaga.funcao,
+            data: vaga.data,
+            motivo: vaga.motivo,
+            militarSugeridoId: m.id,
+            militarId: m.id,
+            vagaVoluntariaId: vagaId,
+            criadoPorId: usuarioAtual?.id ?? '',
+            criado_em: new Date().toISOString(),
+          });
+          const usuarioMilitar = usuarios.find((u) => u.militarId === m.id);
+          if (usuarioMilitar) {
+            await notificar(
+              usuarioMilitar.id,
+              'vaga_voluntaria_resolvida',
+              `Ninguém se voluntariou a tempo — você foi escalado compulsoriamente pra ${funcaoNome} em ${vaga.data}.`,
+              '/sistema/escala',
+            );
+          }
+        }),
+      );
     },
-    [vagasVoluntariasExtraordinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
+    [vagasVoluntariasExtraordinarias, militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
   );
 
   // --- Solicitação de Reforço (CRB/COP -> UBM) ------------------------------

@@ -200,17 +200,72 @@ export function extraordinariasNoMes(militarId: string, data: string, extraordin
 }
 
 /**
+ * Um militar só pode ser escalado numa extraordinária se tiver pelo menos
+ * 24h de folga desde o serviço (ordinária OU extraordinária, de qualquer
+ * função) imediatamente anterior — como o serviço é um turno de 24h corrido,
+ * isso equivale a: não ter servido no dia de calendário imediatamente
+ * anterior a `data`.
+ */
+export function temFolga24hAntes(
+  militarId: string,
+  data: string,
+  escalasOrdinarias: EscalaOrdinaria[],
+  extraordinariasAnteriores: EscalaExtraordinaria[],
+): boolean {
+  const diaAnterior = formatarDataISO(addDays(parseISO(data), -1));
+  const serviuOrdinaria = escalasOrdinarias.some((e) => e.militarId === militarId && e.data === diaAnterior);
+  const serviuExtraordinaria = extraordinariasAnteriores.some((e) => e.militarId === militarId && e.data === diaAnterior);
+  return !serviuOrdinaria && !serviuExtraordinaria;
+}
+
+/**
+ * Hierarquia dos praças, do mais antigo pro mais moderno — usada só como
+ * desempate entre militares já empatados em "mais folgado" (nunca decide
+ * sozinha: ver `ordenarCandidatosExtraordinario`). Índice menor = mais
+ * antigo. Postos fora dessa lista (oficiais, texto não reconhecido) voltam
+ * -1 — tratados como mais antigos que qualquer praça, então nunca "sobram"
+ * como os mais modernos num empate.
+ */
+const HIERARQUIA_PRACAS_MAIS_ANTIGO_PRIMEIRO = [
+  ['subtenente'],
+  ['1 sgt', '1o sgt', 'primeiro sgt', 'primeiro sargento'],
+  ['2 sgt', '2o sgt', 'segundo sgt', 'segundo sargento'],
+  ['3 sgt', '3o sgt', 'terceiro sgt', 'terceiro sargento'],
+  ['cb', 'cabo'],
+  ['sd', 'soldado'],
+];
+
+function normalizarPosto(posto: string): string {
+  return posto
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[º°]/g, 'o')
+    .trim();
+}
+
+/** Posição na hierarquia (0 = mais antigo). -1 pra postos não reconhecidos (oficiais etc.), tratados como mais antigos que qualquer praça listada. */
+export function posicaoNaHierarquia(posto: string): number {
+  const normalizado = normalizarPosto(posto);
+  return HIERARQUIA_PRACAS_MAIS_ANTIGO_PRIMEIRO.findIndex((sinonimos) =>
+    sinonimos.some((s) => normalizado === s || normalizado.includes(s)),
+  );
+}
+
+/**
  * Ordena os elegíveis pra uma escala extraordinária (função + data): dentro
  * do rodízio da função solicitada, prioriza quem está mais "folgado" —
  * considerando o total de serviços já feitos (ordinária + extraordinária
- * juntas, não só extraordinária) —, desempatando por quem está há mais tempo
- * sem reforço extraordinário. Nunca inclui quem já bateu o teto mensal de
- * `LIMITE_EXTRAORDINARIAS_POR_MES` reforços (esse sim conta só extraordinária,
- * e em qualquer função — é limite de sobrecarga do militar, não da função).
+ * juntas, não só extraordinária). Só entre EMPATADOS em folga, desempata por
+ * hierarquia (mais moderno primeiro) e, ainda empatado, por há-mais-tempo-
+ * sem-reforço-extraordinário. Nunca inclui quem já bateu o teto mensal de
+ * `LIMITE_EXTRAORDINARIAS_POR_MES` reforços, nem quem não tem 24h de folga
+ * desde o serviço anterior (ver `temFolga24hAntes`) — únicos impedimentos
+ * de elegibilidade.
  *
  * Usada tanto pra sugestão automática (índice 0 — ver `sugerirMilitarExtraordinario`)
- * quanto pra decidir, dentre vários voluntários de uma mesma vaga, quem
- * assume: o mais bem-ranqueado (mesma prioridade de sempre) entre eles.
+ * quanto pra montar a lista prévia de uma vaga voluntária (os N primeiros
+ * dessa ordem, ver `dispararVagaVoluntariaExtraordinaria`).
  */
 export function ordenarCandidatosExtraordinario(params: {
   ubmId: string;
@@ -224,7 +279,8 @@ export function ordenarCandidatosExtraordinario(params: {
   const { ubmId, funcao, data, afastamentos, escalasOrdinarias, extraordinariasAnteriores } = params;
   const elegiveis = militaresDaFuncao(params.militares, ubmId, funcao)
     .filter((m) => !estaAfastado(m.id, data, afastamentos))
-    .filter((m) => extraordinariasNoMes(m.id, data, extraordinariasAnteriores) < LIMITE_EXTRAORDINARIAS_POR_MES);
+    .filter((m) => extraordinariasNoMes(m.id, data, extraordinariasAnteriores) < LIMITE_EXTRAORDINARIAS_POR_MES)
+    .filter((m) => temFolga24hAntes(m.id, data, escalasOrdinarias, extraordinariasAnteriores));
   if (elegiveis.length === 0) return [];
 
   const ultimaVezPorMilitar = new Map<string, string>();
@@ -236,12 +292,14 @@ export function ordenarCandidatosExtraordinario(params: {
 
   // Prioridade principal: menor total de serviços (ordinária + extraordinária,
   // até a data) na função — o mais folgado dos dois tipos combinados vem
-  // primeiro. Desempate: há mais tempo sem reforço extraordinário —
-  // descontando dias de férias/licença/dispensa médica/outro que caíram
-  // depois do último reforço (não geram fila de recuperação: empurram a
-  // "última vez" pra frente, como se tivessem sido servidos naquele meio
-  // tempo). Missão externa não desconta nada — o tempo afastado nessa
-  // continua contando a favor da prioridade de recuperação depois.
+  // primeiro. Só entre empatados, desempata por hierarquia (mais moderno
+  // primeiro — CB e SD antes de Sargento/Subtenente) e, ainda empatado, por
+  // há-mais-tempo-sem-reforço-extraordinário — descontando dias de
+  // férias/licença/dispensa médica/outro que caíram depois do último
+  // reforço (não geram fila de recuperação: empurram a "última vez" pra
+  // frente, como se tivessem sido servidos naquele meio tempo). Missão
+  // externa não desconta nada — o tempo afastado nessa continua contando a
+  // favor da prioridade de recuperação depois.
   return elegiveis
     .map((m) => {
       const servicosOrdinaria = escalasOrdinarias.filter(
@@ -258,11 +316,13 @@ export function ordenarCandidatosExtraordinario(params: {
         const isentosNoIntervalo = diasIsentosAteData(m.id, data, afastamentos) - diasIsentosAteData(m.id, ultimaReal, afastamentos);
         ultimaData = isentosNoIntervalo > 0 ? formatarDataISO(addDays(parseISO(ultimaReal), isentosNoIntervalo)) : ultimaReal;
       }
-      return { militar: m, totalServicos, ultimaData };
+      return { militar: m, totalServicos, hierarquia: posicaoNaHierarquia(m.posto), ultimaData };
     })
     .sort((a, b) => {
-      const diferenca = a.totalServicos - b.totalServicos;
-      if (diferenca !== 0) return diferenca;
+      const diferencaServicos = a.totalServicos - b.totalServicos;
+      if (diferencaServicos !== 0) return diferencaServicos;
+      const diferencaHierarquia = b.hierarquia - a.hierarquia; // maior índice (mais moderno) primeiro
+      if (diferencaHierarquia !== 0) return diferencaHierarquia;
       return a.ultimaData.localeCompare(b.ultimaData);
     })
     .map((c) => c.militar);

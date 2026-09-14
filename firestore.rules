@@ -148,22 +148,25 @@ service cloud.firestore {
       allow read: if ativo();
       allow create: if podeGerenciarUbm(request.resource.data.ubmId)
         // Voluntariado (ver nota em types.ts): o próprio militar cria o
-        // registro definitivo pra si mesmo, só quando a vaga referenciada
-        // ainda está aberta e ele está entre os elegíveis dela.
+        // registro definitivo pra si mesmo, só quando já consta como
+        // voluntário na vaga referenciada (a atualização da vaga acontece
+        // sempre ANTES dessa criação — ver dispararVagaVoluntariaExtraordinaria).
         || (
           ativo()
           && 'vagaVoluntariaId' in request.resource.data
           && request.resource.data.militarId == perfilDoc().militarId
-          && get(/databases/$(database)/documents/vagas_voluntarias_extraordinarias/$(request.resource.data.vagaVoluntariaId)).data.status == 'preenchida'
-          && get(/databases/$(database)/documents/vagas_voluntarias_extraordinarias/$(request.resource.data.vagaVoluntariaId)).data.militarId == perfilDoc().militarId
+          && get(/databases/$(database)/documents/vagas_voluntarias_extraordinarias/$(request.resource.data.vagaVoluntariaId)).data.voluntariosIds.hasAny([perfilDoc().militarId])
           && get(/databases/$(database)/documents/vagas_voluntarias_extraordinarias/$(request.resource.data.vagaVoluntariaId)).data.ubmId == request.resource.data.ubmId
         );
       allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
     // Vaga voluntária de extraordinária (ver nota em types.ts): o escalante
-    // dispara; qualquer elegível ativo pode se voluntariar enquanto ainda
-    // aberta, mas só fechando a vaga pra si mesmo (nunca indicando outro
-    // militar) e sem tocar nos demais campos.
+    // dispara (podendo pedir mais de um militar, campo `quantidade`);
+    // qualquer elegível ativo pode se acrescentar a `voluntariosIds` enquanto
+    // ainda houver posição sobrando, mas só a si mesmo (nunca indicando
+    // outro militar) e sem tocar nos demais campos — o tamanho do array só
+    // pode crescer em 1 por vez e nunca passar de `quantidade`, o que evita
+    // dois voluntários simultâneos estourarem a vaga.
     match /vagas_voluntarias_extraordinarias/{documento} {
       allow read: if ativo();
       allow create: if podeGerenciarUbm(request.resource.data.ubmId);
@@ -171,11 +174,14 @@ service cloud.firestore {
         || (
           ativo()
           && resource.data.status == 'aberta'
+          && resource.data.voluntariosIds.size() < resource.data.quantidade
           && resource.data.candidatosElegiveisIds.hasAny([perfilDoc().militarId])
-          && request.resource.data.status == 'preenchida'
-          && request.resource.data.militarId == perfilDoc().militarId
-          && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'militarId', 'voluntariosIds', 'escalaExtraordinariaId', 'resolvido_em'])
+          && request.resource.data.status in ['aberta', 'preenchida']
+          && request.resource.data.voluntariosIds.size() == resource.data.voluntariosIds.size() + 1
+          && request.resource.data.voluntariosIds.size() <= resource.data.quantidade
+          && request.resource.data.voluntariosIds.hasAll(resource.data.voluntariosIds)
+          && request.resource.data.voluntariosIds.hasAny([perfilDoc().militarId])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'voluntariosIds'])
         );
       allow delete: if master();
     }

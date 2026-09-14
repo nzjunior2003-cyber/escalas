@@ -4,7 +4,7 @@ import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarDays, Plus, Sparkles, Lock, Megaphone, HandHeart } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, semanaInicioDe } from '../../lib/escala';
+import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, ordenarCandidatosExtraordinario, semanaInicioDe } from '../../lib/escala';
 import { STATUS_VAGA_VOLUNTARIA_LABELS, temPapel } from '../../types';
 
 type Aba = 'ordinaria' | 'extraordinaria' | 'diferenciada';
@@ -207,6 +207,8 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
     usuarioAtual,
     militares,
     funcoes,
+    afastamentos,
+    escalasOrdinarias,
     escalasExtraordinarias,
     fechamentosEscala,
     vagasVoluntariasExtraordinarias,
@@ -219,7 +221,7 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
   const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
   const [form, setForm] = useState({ funcao: '', data: formatarDataISO(new Date()), motivo: '' });
   const [criando, setCriando] = useState(false);
-  const [formVaga, setFormVaga] = useState({ funcao: '', data: formatarDataISO(new Date()), motivo: '', prazo: formatarDataISO(new Date()) });
+  const [formVaga, setFormVaga] = useState({ funcao: '', data: formatarDataISO(new Date()), motivo: '', prazo: formatarDataISO(new Date()), quantidade: 1 });
   const [disparando, setDisparando] = useState(false);
   const [processandoVagaId, setProcessandoVagaId] = useState<string | null>(null);
 
@@ -263,8 +265,8 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
     e.preventDefault();
     setDisparando(true);
     try {
-      await dispararVagaVoluntariaExtraordinaria({ ubmId, ...formVaga });
-      setFormVaga({ funcao: funcoesDaUbm[0]?.id ?? '', data: formatarDataISO(new Date()), motivo: '', prazo: formatarDataISO(new Date()) });
+      await dispararVagaVoluntariaExtraordinaria({ ubmId, ...formVaga, quantidade: Math.max(1, formVaga.quantidade) });
+      setFormVaga({ funcao: funcoesDaUbm[0]?.id ?? '', data: formatarDataISO(new Date()), motivo: '', prazo: formatarDataISO(new Date()), quantidade: 1 });
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível disparar a vaga pra voluntariado.');
     } finally {
@@ -322,6 +324,16 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
                 <label className="block text-xs font-medium text-gray-500 mb-1">Prazo pra se voluntariar</label>
                 <input type="date" value={formVaga.prazo} onChange={(e) => setFormVaga({ ...formVaga, prazo: e.target.value })} className="w-full sm:w-auto border border-gray-300 rounded-md text-sm py-2 px-3" />
               </div>
+              <div className="min-w-0 w-full sm:w-24">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Quantidade</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={formVaga.quantidade}
+                  onChange={(e) => setFormVaga({ ...formVaga, quantidade: Math.max(1, Number(e.target.value) || 1) })}
+                  className="w-full border border-gray-300 rounded-md text-sm py-2 px-3"
+                />
+              </div>
               <div className="min-w-0 w-full sm:flex-1">
                 <label className="block text-xs font-medium text-gray-500 mb-1">Motivo (ex.: reforço para evento)</label>
                 <input required value={formVaga.motivo} onChange={(e) => setFormVaga({ ...formVaga, motivo: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
@@ -366,12 +378,35 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
           <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
             {vagasAbertas.map((v) => {
               const prazoVencido = v.prazo < hoje;
-              const souElegivel = !!meuMilitarId && v.candidatosElegiveisIds.includes(meuMilitarId);
+              const jaVoluntariado = !!meuMilitarId && v.voluntariosIds.includes(meuMilitarId);
+              const souElegivel = !!meuMilitarId && v.candidatosElegiveisIds.includes(meuMilitarId) && !jaVoluntariado;
+              const faltam = v.quantidade - v.voluntariosIds.length;
+              const listaPrevia = ordenarCandidatosExtraordinario({
+                ubmId: v.ubmId,
+                funcao: v.funcao,
+                data: v.data,
+                militares,
+                afastamentos,
+                escalasOrdinarias,
+                extraordinariasAnteriores: escalasExtraordinarias,
+              })
+                .filter((m) => v.candidatosElegiveisIds.includes(m.id) && !v.voluntariosIds.includes(m.id))
+                .slice(0, faltam);
               return (
                 <div key={v.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 text-sm">
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium text-gray-900">{v.data} — {nomeDaFuncao(v.funcao)}</div>
+                    <div className="font-medium text-gray-900">
+                      {v.data} — {nomeDaFuncao(v.funcao)} <span className="text-xs text-gray-400 font-normal">({v.voluntariosIds.length}/{v.quantidade} preenchida{v.quantidade > 1 ? 's' : ''})</span>
+                    </div>
                     <div className="text-gray-500">{v.motivo}</div>
+                    {v.voluntariosIds.length > 0 && (
+                      <div className="text-xs text-emerald-700 mt-0.5">Voluntários: {v.voluntariosIds.map((id) => nomeMilitar(id)).join(', ')}</div>
+                    )}
+                    {faltam > 0 && (
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        Lista prévia se ninguém mais se voluntariar: {listaPrevia.length > 0 ? listaPrevia.map((m) => m.nome).join(', ') : '—'}
+                      </div>
+                    )}
                     <div className="text-xs text-gray-400 mt-0.5">
                       Prazo pra voluntariar: {v.prazo}{prazoVencido && <span className="text-amber-600 font-medium"> · esgotado</span>}
                     </div>
@@ -392,10 +427,11 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
                         disabled={processandoVagaId === v.id}
                         className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
                       >
-                        Prazo esgotado — escalar compulsoriamente
+                        Prazo esgotado — completar compulsoriamente
                       </button>
                     )}
-                    {!souElegivel && !isEscalante && (
+                    {jaVoluntariado && <span className="text-xs text-emerald-700 font-medium">Você já se voluntariou</span>}
+                    {!souElegivel && !jaVoluntariado && !isEscalante && (
                       <span className="text-xs text-gray-400">Aguardando voluntário</span>
                     )}
                   </div>
@@ -414,7 +450,11 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
               <div key={v.id} className="flex flex-col sm:flex-row sm:items-center gap-1 px-4 py-3 text-sm">
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-gray-900">{v.data} — {nomeDaFuncao(v.funcao)}</div>
-                  <div className="text-gray-500">{STATUS_VAGA_VOLUNTARIA_LABELS[v.status]} · {nomeMilitar(v.militarId)}</div>
+                  <div className="text-gray-500">
+                    {STATUS_VAGA_VOLUNTARIA_LABELS[v.status]}
+                    {v.voluntariosIds.length > 0 && ` · Voluntário(s): ${v.voluntariosIds.map((id) => nomeMilitar(id)).join(', ')}`}
+                    {(v.militaresCompulsoriosIds?.length ?? 0) > 0 && ` · Compulsório(s): ${v.militaresCompulsoriosIds!.map((id) => nomeMilitar(id)).join(', ')}`}
+                  </div>
                 </div>
               </div>
             ))}
