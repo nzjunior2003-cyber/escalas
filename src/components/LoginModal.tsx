@@ -10,7 +10,7 @@ type ModalView = 'login' | 'solicitar' | 'esqueci' | 'completarCadastro';
 
 const SENHA_PADRAO_PRIMEIRO_ACESSO = '123456';
 
-export default function LoginModal({ onClose }: { onClose: () => void }) {
+export default function LoginModal({ onClose, embedded }: { onClose: () => void; embedded?: boolean }) {
   const { login, solicitarAcesso, enviarResetSenha, validarMatriculaEfetivo, primeiroAcessoPorMatricula, firebaseConfigurado, ubms } =
     useApp();
   const navigate = useNavigate();
@@ -174,36 +174,37 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
   const classeBotaoPrimario =
     'w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b border-gray-100">
-          <h2 className="text-xl font-bold text-gray-900">
+  const conteudo = (
+    <div className={embedded ? 'bg-white dark:bg-slate-900 rounded-xl w-full' : 'bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] overflow-y-auto'}>
+        <div className={`flex items-center ${embedded ? 'justify-center pb-4 border-b border-gray-100 dark:border-slate-800' : 'justify-between p-6 border-b border-gray-100 dark:border-slate-800'}`}>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">
             {view === 'login' && 'Acesso ao Sistema'}
             {view === 'solicitar' && 'Solicitar Acesso'}
             {view === 'esqueci' && 'Recuperar Senha'}
             {view === 'completarCadastro' && 'Completar Cadastro'}
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-500 rounded-full p-1 hover:bg-gray-100 transition-colors">
-            <X className="w-6 h-6" />
-          </button>
+          {!embedded && (
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-500 rounded-full p-1 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors">
+              <X className="w-6 h-6" />
+            </button>
+          )}
         </div>
 
         {!firebaseConfigurado && (
-          <div className="mx-6 mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <div className="mx-6 mt-4 rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 p-3 text-sm text-amber-800 dark:text-amber-300">
             O Firebase ainda não foi configurado neste ambiente. Defina as variáveis
             <span className="font-mono"> VITE_FIREBASE_*</span> no arquivo <span className="font-mono">.env</span>.
           </div>
         )}
 
         {erro && (
-          <div role="alert" className="mx-6 mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div role="alert" className="mx-6 mt-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 p-3 text-sm text-red-700 dark:text-red-300">
             {erro}
           </div>
         )}
 
         {view === 'login' && (
-          <form onSubmit={handleLogin} className="p-6 space-y-6">
+          <form onSubmit={handleLogin} className={`${embedded ? "pt-4" : "p-6"} space-y-6`}>
             <FormField
               label="Matrícula ou E-mail"
               icon={IdCard}
@@ -213,7 +214,7 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setIdentificador(e.target.value)}
               placeholder="Sua matrícula ou e-mail"
             />
-            <p className="-mt-4 text-xs text-gray-500">
+            <p className="-mt-4 text-xs text-gray-500 dark:text-slate-400">
               Primeiro acesso? Digite sua matrícula (sem o dígito verificador) e a senha padrão{' '}
               <span className="font-mono font-medium">{SENHA_PADRAO_PRIMEIRO_ACESSO}</span>.
             </p>
@@ -235,9 +236,9 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
             <button type="submit" disabled={aguardando} className={classeBotaoPrimario}>
               {aguardando ? 'Entrando...' : 'Entrar'}
             </button>
-            <div className="text-center mt-4 border-t pt-4">
-              <p className="text-sm text-gray-600">Não está no efetivo cadastrado na planilha?</p>
-              <button type="button" onClick={() => trocarView('solicitar')} className="mt-2 w-full flex justify-center py-2 px-4 border border-red-200 rounded-md shadow-sm text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+            <div className="text-center mt-4 border-t border-gray-100 dark:border-slate-800 pt-4">
+              <p className="text-sm text-gray-600 dark:text-slate-400">Não está no efetivo cadastrado na planilha?</p>
+              <button type="button" onClick={() => trocarView('solicitar')} className="mt-2 w-full flex justify-center py-2 px-4 border border-red-200 dark:border-red-900 rounded-md shadow-sm text-sm font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950 hover:bg-red-100 dark:hover:bg-red-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
                 Solicitar Acesso Manualmente
               </button>
             </div>
@@ -245,8 +246,8 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
         )}
 
         {view === 'completarCadastro' && militarValidado && (
-          <form onSubmit={handleCompletarCadastro} className="p-6 space-y-4">
-            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-start gap-2">
+          <form onSubmit={handleCompletarCadastro} className={`${embedded ? "pt-4" : "p-6"} space-y-4`}>
+            <div className="rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950 p-3 text-sm text-emerald-800 dark:text-emerald-300 flex items-start gap-2">
               <ShieldCheck className="w-5 h-5 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="font-medium">Matrícula encontrada no efetivo do CBMPA</p>
@@ -257,8 +258,8 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
             <FormField label="Nome de Guerra" icon={User} type="text" required value={nomeGuerra} onChange={(e) => setNomeGuerra(e.target.value)} placeholder="Como você é chamado no dia a dia" />
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">UBM</label>
-              <select value={cadastroUbmId} onChange={(e) => setCadastroUbmId(e.target.value)} required className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 sm:text-sm">
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">UBM</label>
+              <select value={cadastroUbmId} onChange={(e) => setCadastroUbmId(e.target.value)} required className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 sm:text-sm">
                 <option value="" disabled>Selecione sua UBM</option>
                 {ubms.map((u) => (
                   <option key={u.id} value={u.id}>{u.sigla} - {u.nome}</option>
@@ -277,7 +278,7 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
               {aguardando ? 'Enviando...' : 'Concluir Cadastro'}
             </button>
             <div className="text-center mt-2">
-              <button type="button" onClick={() => trocarView('login')} className="text-sm font-medium text-gray-600 hover:text-gray-900">
+              <button type="button" onClick={() => trocarView('login')} className="text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white">
                 Voltar para o Login
               </button>
             </div>
@@ -285,12 +286,12 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
         )}
 
         {view === 'solicitar' && (
-          <form onSubmit={handleSolicitar} className="p-6 space-y-4">
+          <form onSubmit={handleSolicitar} className={`${embedded ? "pt-4" : "p-6"} space-y-4`}>
             <FormField label="Nome Completo" icon={User} type="text" required value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome completo" />
             <FormField label="Posto/Graduação" icon={Briefcase} type="text" required value={cargo} onChange={(e) => setCargo(e.target.value)} placeholder="Ex: 1º TEN QOABM" />
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">UBM</label>
-              <select value={ubmId} onChange={(e) => setUbmId(e.target.value)} required className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 sm:text-sm">
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">UBM</label>
+              <select value={ubmId} onChange={(e) => setUbmId(e.target.value)} required className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 sm:text-sm">
                 <option value="" disabled>Selecione sua UBM</option>
                 {ubms.map((u) => (
                   <option key={u.id} value={u.id}>{u.sigla} - {u.nome}</option>
@@ -314,7 +315,7 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={() => trocarView('login')}
-                className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                className="text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white"
               >
                 Voltar para o Login
               </button>
@@ -323,8 +324,8 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
         )}
 
         {view === 'esqueci' && (
-          <form onSubmit={handleEsqueci} className="p-6 space-y-6">
-            <p className="text-sm text-gray-600">
+          <form onSubmit={handleEsqueci} className={`${embedded ? "pt-4" : "p-6"} space-y-6`}>
+            <p className="text-sm text-gray-600 dark:text-slate-400">
               Digite seu e-mail cadastrado (não a matrícula). Você receberá um link seguro
               para cadastrar uma nova senha.
             </p>
@@ -337,14 +338,21 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={() => trocarView('login')}
-                className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                className="text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white"
               >
                 Voltar para o Login
               </button>
             </div>
           </form>
         )}
-      </div>
+    </div>
+  );
+
+  if (embedded) return conteudo;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
+      {conteudo}
     </div>
   );
 }
