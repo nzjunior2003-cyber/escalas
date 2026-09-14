@@ -52,6 +52,7 @@ import {
   EscalaOrdinaria,
   FUNCOES_PADRAO,
   FuncaoUbm,
+  EscalaComando,
   FechamentoEscala,
   HistoricoEscala,
   Militar,
@@ -79,6 +80,7 @@ interface AppContextData {
   presencas: RegistroPresenca[];
   solicitacoesServico: SolicitacaoServico[];
   solicitacoesReforco: SolicitacaoReforco[];
+  escalasComando: EscalaComando[];
   fechamentosEscala: FechamentoEscala[];
   historicoEscalas: HistoricoEscala[];
   alertas: Alerta[];
@@ -307,6 +309,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const presencas = useColecao<RegistroPresenca>('presencas', isAuthenticated);
   const solicitacoesServico = useColecao<SolicitacaoServico>('solicitacoes_servico', isAuthenticated);
   const solicitacoesReforco = useColecao<SolicitacaoReforco>('solicitacoes_reforco', isAuthenticated);
+  const escalasComando = useColecao<EscalaComando>('escalas_comando', isAuthenticated);
   const fechamentosEscala = useColecao<FechamentoEscala>('fechamentos_escala', isAuthenticated);
   const historicoEscalas = useColecao<HistoricoEscala>('historico_escalas', isAuthenticated);
   const alertas = useColecao<Alerta>('alertas', isAuthenticated, {
@@ -885,6 +888,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           atendido_em: new Date().toISOString(),
         });
 
+        // Só a partir de agora o CRB/COP passa a enxergar o militar — antes
+        // de atendida, a sugestão automática (militarSugeridoId) fica visível
+        // só pra UBM. E o militar já entra na "escala do comando" com a
+        // indicação de qual UBM o cedeu.
+        const funcaoNome = funcoes.find((f) => f.id === solicitacao.funcao)?.nome ?? 'Função removida';
+        await addDoc(collection(db, 'escalas_comando'), {
+          comandoId: solicitacao.comandoId,
+          militarId: militarFinal,
+          ubmOrigemId: solicitacao.ubmId,
+          funcaoNome,
+          data: solicitacao.data,
+          motivo: solicitacao.motivo,
+          origemReforcoId: id,
+          criado_em: new Date().toISOString(),
+        });
+
         const usuarioMilitar = usuarios.find((u) => u.militarId === militarFinal);
         if (usuarioMilitar) {
           await notificar(
@@ -908,7 +927,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const mensagem = decisao.atender ? 'A UBM atendeu sua solicitação de reforço.' : 'A UBM recusou sua solicitação de reforço.';
       await Promise.all(comandoUsuarios.map((u) => notificar(u.id, 'reforco_atendido', mensagem, '/sistema/reforcos')));
     },
-    [solicitacoesReforco, comandos, usuarios, escalasExtraordinarias, usuarioAtual, notificar],
+    [solicitacoesReforco, comandos, usuarios, funcoes, escalasExtraordinarias, usuarioAtual, notificar],
   );
 
   // --- Escala diferenciada ---------------------------------------------------
@@ -1202,6 +1221,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       presencas,
       solicitacoesServico,
       solicitacoesReforco,
+      escalasComando,
       fechamentosEscala,
       historicoEscalas,
       alertas,
@@ -1264,6 +1284,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       presencas,
       solicitacoesServico,
       solicitacoesReforco,
+      escalasComando,
       fechamentosEscala,
       historicoEscalas,
       alertas,

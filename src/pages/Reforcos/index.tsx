@@ -29,7 +29,7 @@ export default function Reforcos() {
 }
 
 function PainelComando() {
-  const { usuarioAtual, comandos, ubms, funcoes, militares, solicitacoesReforco, criarSolicitacaoReforco } = useApp();
+  const { usuarioAtual, comandos, ubms, funcoes, militares, solicitacoesReforco, escalasComando, criarSolicitacaoReforco } = useApp();
   const meuComando = comandos.find((c) => c.id === usuarioAtual?.comandoId);
 
   const [form, setForm] = useState({ ubmId: '', funcao: '', postoDesejado: '', data: formatarDataISO(new Date()), motivo: '' });
@@ -49,12 +49,20 @@ function PainelComando() {
     .filter((s) => s.comandoId === meuComando?.id)
     .sort((a, b) => b.criado_em.localeCompare(a.criado_em));
 
+  const escalaDoComando = escalasComando
+    .filter((e) => e.comandoId === meuComando?.id)
+    .sort((a, b) => b.data.localeCompare(a.data));
+
   const nomeUbm = (id: string) => {
     const ubm = ubms.find((u) => u.id === id);
     return ubm ? `${ubm.sigla} - ${ubm.nome}` : '—';
   };
   const nomeFuncao = (id: string) => funcoes.find((f) => f.id === id)?.nome ?? 'Função removida';
-  const nomeMilitar = (id?: string) => (id ? militares.find((m) => m.id === id)?.nome ?? '—' : '—');
+  const nomeMilitar = (id?: string) => {
+    if (!id) return '—';
+    const m = militares.find((mm) => mm.id === id);
+    return m ? `${m.posto} ${m.nome}`.trim() : '—';
+  };
 
   const handleEnviar = async (e: FormEvent) => {
     e.preventDefault();
@@ -139,6 +147,28 @@ function PainelComando() {
             </div>
           ))
         )}
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">Efetivo em reforço</h2>
+        <p className="text-sm text-gray-500 mb-3">
+          Militares cedidos pelas UBMs depois de atendida a solicitação — o {meuComando.sigla} só passa a enxergar o
+          nome de cada um a partir daqui, nunca a sugestão automática que a UBM avalia antes de decidir.
+        </p>
+        <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+          {escalaDoComando.length === 0 ? (
+            <p className="px-4 py-8 text-center text-gray-400">Nenhum militar em reforço no momento.</p>
+          ) : (
+            escalaDoComando.map((e) => (
+              <div key={e.id} className="flex flex-col sm:flex-row sm:items-center gap-1 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-gray-900">{nomeMilitar(e.militarId)} — {e.funcaoNome}</div>
+                  <div className="text-gray-500">{e.data} · Cedido por {nomeUbm(e.ubmOrigemId)} · {e.motivo}</div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

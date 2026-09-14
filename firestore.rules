@@ -200,6 +200,16 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/comandos/$(request.resource.data.comandoId)).data.ubmIds.hasAny([request.resource.data.ubmId]);
       allow update: if podeGerenciarUbm(resource.data.ubmId);
     }
+    // Escala do Comando (ver nota em types.ts): ledger de reforços recebidos
+    // pelo CRB/COP, gravado só quando a UBM cedente atende a solicitação —
+    // é por isso que o comando só vê o militar a partir daqui, nunca antes.
+    // Só quem gerencia a UBM de origem grava (é ela quem decide "atender");
+    // o comando e qualquer usuário ativo só leem.
+    match /escalas_comando/{documento} {
+      allow read: if ativo();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmOrigemId);
+      allow update, delete: if master();
+    }
     match /alertas/{documento} {
       allow read: if ativo() && resource.data.usuarioId == request.auth.uid;
       allow create: if ativo();

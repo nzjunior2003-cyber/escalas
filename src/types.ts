@@ -431,6 +431,27 @@ export interface SolicitacaoReforco {
 }
 
 // ---------------------------------------------------------------------------
+// Escala do Comando (CRB/COP)
+//
+// Ledger de reforços recebidos: quando a UBM atende uma SolicitacaoReforco,
+// entra aqui um registro do militar empenhado, com a UBM de origem — é como
+// o CRB/COP enxerga seu "efetivo em reforço" nas próprias telas, sem se
+// confundir com o efetivo próprio da UBM cedente nem alterar a escala dela.
+// ---------------------------------------------------------------------------
+export interface EscalaComando {
+  id: string;
+  comandoId: string;
+  militarId: string;
+  ubmOrigemId: string;
+  /** Nome da função no momento do reforço (a função é da UBM de origem, não do comando). */
+  funcaoNome: string;
+  data: string; // yyyy-MM-dd
+  motivo: string;
+  origemReforcoId: string;
+  criado_em: string;
+}
+
+// ---------------------------------------------------------------------------
 // Alertas / notificações
 // ---------------------------------------------------------------------------
 export type TipoAlerta =
