@@ -4,7 +4,16 @@ import { Download, Lock, Unlock } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { formatarDataISO } from '../../lib/escala';
 import { gerarPdfEscala } from '../../lib/pdfEscala';
-import { temPapel, type HistoricoEscala, type TipoEscalaServico } from '../../types';
+import { temPapel, type HistoricoEscala, type TipoEscalaServico, type Ubm } from '../../types';
+
+/** Número ordinal (ex.: "30º") + nome por extenso da UBM, sem duplicar o ordinal quando o campo `nome` já o inclui. */
+function nomeUbmPorExtenso(ubm: Ubm | undefined): string {
+  if (!ubm) return 'Unidade de Bombeiro Militar';
+  const ordinal = ubm.sigla.match(/^\d+º/)?.[0];
+  const nome = ubm.nome.trim();
+  if (!ordinal || nome.startsWith(ordinal)) return nome;
+  return `${ordinal} ${nome}`;
+}
 
 export default function Historico() {
   const {
@@ -85,7 +94,7 @@ export default function Historico() {
 
       await gerarPdfEscala({
         tipo,
-        ubmNome: ubm ? `${ubm.sigla} - ${ubm.nome}` : 'Unidade de Bombeiro Militar',
+        ubmNome: nomeUbmPorExtenso(ubm),
         ubmLogoDataUrl: ubm?.logoDataUrl,
         ubmEndereco: ubm?.endereco,
         ubmCep: ubm?.cep,
@@ -113,7 +122,7 @@ export default function Historico() {
 
     await gerarPdfEscala({
       tipo: h.tipo,
-      ubmNome: ubm ? `${ubm.sigla} - ${ubm.nome}` : 'Unidade de Bombeiro Militar',
+      ubmNome: nomeUbmPorExtenso(ubm),
       ubmLogoDataUrl: ubm?.logoDataUrl,
       ubmEndereco: ubm?.endereco,
       ubmCep: ubm?.cep,

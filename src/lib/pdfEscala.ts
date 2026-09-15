@@ -63,19 +63,19 @@ export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void>
   const alturaPagina = doc.internal.pageSize.getHeight();
   const margemLateral = 40;
   const larguraUtil = larguraPagina - margemLateral * 2;
-  let y = 32;
+  let y = 30;
 
   // --- Cabeçalho: brasão institucional à esquerda; à direita, só o
   // essencial — instituição, CRB (quando houver) e a UBM por extenso ------
   const logoInstitucionalDataUrl = await carregarImagemPublicaComoDataUrl('/brasao-duplo-cbmpa-cedec.png');
-  const larguraLogo = 74;
+  const larguraLogo = 100;
   const alturaLogo = larguraLogo / PROPORCAO_BRASAO_DUPLO;
   if (logoInstitucionalDataUrl) {
     doc.addImage(logoInstitucionalDataUrl, 'PNG', margemLateral, y, larguraLogo, alturaLogo);
   }
 
   const centroTextoX = margemLateral + larguraLogo + (larguraUtil - larguraLogo) / 2;
-  let yTexto = y + 4;
+  let yTexto = y + 10;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   doc.text('Corpo de Bombeiros Militar do Pará e', centroTextoX, yTexto, { align: 'center' });
@@ -95,22 +95,13 @@ export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void>
   doc.text(dados.ubmNome, centroTextoX, yTexto, { align: 'center' });
   yTexto += 15;
 
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(120);
-  doc.setFontSize(9.5);
-  const inicio = new Date(`${dados.semanaInicio}T00:00:00`);
-  const fim = new Date(`${dados.semanaInicio}T00:00:00`);
-  fim.setDate(fim.getDate() + 6);
-  const tituloEscala = `Escala ${dados.tipo === 'ordinaria' ? 'Ordinária' : 'Extraordinária'} — Semana de ${format(inicio, 'dd/MM/yyyy')} a ${format(fim, 'dd/MM/yyyy')}`;
-  doc.text(tituloEscala, centroTextoX, yTexto, { align: 'center' });
-  doc.setTextColor(0);
-
   y = Math.max(y + alturaLogo, yTexto) + 10;
 
   doc.setDrawColor(127, 29, 29);
   doc.setLineWidth(1.2);
   doc.line(margemLateral, y, larguraPagina - margemLateral, y);
-  y += 14;
+
+  const yConteudoTop = y + 14;
 
   // --- Matriz: função nas linhas, dias da semana (com data) nas colunas --
   const dias = Array.from({ length: 7 }, (_, i) => {
@@ -137,19 +128,52 @@ export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void>
 
   const corpo = dados.funcoes.map((f) => [f.nome, ...dias.map((dia) => celula(f.id, dia))]);
 
-  autoTable(doc, {
-    startY: y,
+  const configTabela = {
     head: [cabecalho],
     body: corpo,
     margin: { left: margemLateral, right: margemLateral },
-    headStyles: { fillColor: COR_OURO, textColor: [40, 30, 0], fontStyle: 'bold', halign: 'center', fontSize: 9 },
-    styles: { fontSize: 9, cellPadding: 6, valign: 'middle' },
-    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 130 } },
-    alternateRowStyles: { fillColor: [237, 237, 237] },
-    bodyStyles: { fillColor: [255, 255, 255] },
-  });
+    headStyles: { fillColor: COR_OURO, textColor: [40, 30, 0] as [number, number, number], fontStyle: 'bold' as const, halign: 'center' as const, fontSize: 9 },
+    styles: { fontSize: 9, cellPadding: 6, valign: 'middle' as const },
+    columnStyles: { 0: { fontStyle: 'bold' as const, cellWidth: 130 } },
+    alternateRowStyles: { fillColor: [237, 237, 237] as [number, number, number] },
+    bodyStyles: { fillColor: [255, 255, 255] as [number, number, number] },
+  };
 
-  let yAtual = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 22;
+  // --- Mede a altura real da tabela num documento descartável, pra poder
+  // centralizar o conjunto título+tabela+data+assinatura entre o cabeçalho
+  // e o rodapé antes de desenhar qualquer coisa na página de verdade -------
+  const medidor = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+  autoTable(medidor, { ...configTabela, startY: 0 });
+  const alturaTabela = (medidor as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+
+  const alturaTitulo = 18;
+  const gapTituloTabela = 12;
+  const gapTabelaData = 22;
+  const alturaData = 14;
+  const gapDataAssinatura = 46;
+  const alturaAssinatura = 28;
+  const alturaBloco = alturaTitulo + gapTituloTabela + alturaTabela + gapTabelaData + alturaData + gapDataAssinatura + alturaAssinatura;
+
+  const yRodapeBoundary = alturaPagina - 92;
+  const espacoDisponivel = yRodapeBoundary - yConteudoTop;
+  const gapMinimoAposCabecalho = 26;
+  const yBlocoTop = yConteudoTop + Math.max(gapMinimoAposCabecalho, (espacoDisponivel - alturaBloco) / 2);
+
+  // --- Título da escala, em negrito e caixa alta ---------------------------
+  const centroX = larguraPagina / 2;
+  const inicio = new Date(`${dados.semanaInicio}T00:00:00`);
+  const fim = new Date(`${dados.semanaInicio}T00:00:00`);
+  fim.setDate(fim.getDate() + 6);
+  const tituloEscala = `ESCALA ${dados.tipo === 'ordinaria' ? 'ORDINÁRIA' : 'EXTRAORDINÁRIA'} — SEMANA DE ${format(inicio, 'dd/MM/yyyy')} A ${format(fim, 'dd/MM/yyyy')}`;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(0);
+  doc.text(tituloEscala, centroX, yBlocoTop, { align: 'center' });
+
+  const yTabela = yBlocoTop + gapTituloTabela;
+  autoTable(doc, { ...configTabela, startY: yTabela });
+
+  let yAtual = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + gapTabelaData;
 
   // --- Cidade e data de expedição -----------------------------------------
   const hoje = new Date();
@@ -160,10 +184,10 @@ export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void>
   doc.text(`${cidadeExpedicao}, ${format(hoje, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}.`, larguraPagina - margemLateral, yAtual, {
     align: 'right',
   });
-  yAtual += 26;
+  yAtual += gapDataAssinatura;
 
-  // --- Assinatura do escalante ---------------------------------------------
-  const centroX = larguraPagina / 2;
+  // --- Assinatura do escalante — com espaço reservado abaixo pra uma
+  // assinatura digital gov.br (carimbo/QR) ser aplicada sobre o PDF --------
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10.5);
   const linhaAssinatura = dados.escalanteCargo ? `${dados.escalanteNome} – ${dados.escalanteCargo}` : dados.escalanteNome;
