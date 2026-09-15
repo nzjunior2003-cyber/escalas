@@ -12,9 +12,6 @@ import {
   temPapel,
 } from '../../types';
 
-const OBSERVACAO_PADRAO =
-  'Caso o militar substituto esteja escalado em outra escala por necessidade do serviço, será considerada inválida esta autorização.';
-
 export default function Solicitacoes() {
   const {
     usuarioAtual,
@@ -89,12 +86,13 @@ export default function Solicitacoes() {
       const escalas = s.tipoEscalaOrigem === 'ordinaria' ? escalasOrdinarias : escalasExtraordinarias;
       const escala = escalas.find((e) => e.id === s.escalaOrigemId);
       const funcaoNome = funcoes.find((f) => f.id === escala?.funcao)?.nome ?? 'Função removida';
-      const eventoExtraordinario =
+      const servico =
         s.tipoEscalaOrigem === 'extraordinaria' && escala && 'motivo' in escala
           ? escala.motivo
-          : `Serviço Ordinário — ${funcaoNome}`;
+          : funcaoNome;
 
       const solicitante = usuarios.find((u) => u.id === s.solicitanteId);
+      const militarSolicitante = militares.find((m) => m.id === solicitante?.militarId);
       const indicado = usuarios.find((u) => u.id === s.indicadoId);
       const militarIndicado = militares.find((m) => m.id === indicado?.militarId);
       const aprovador = usuarios.find((u) => u.id === s.aprovadoPorId);
@@ -105,17 +103,21 @@ export default function Solicitacoes() {
         ubmNome: ubm ? `${ubm.sigla} - ${ubm.nome}` : 'Unidade de Bombeiro Militar',
         ubmSigla: ubm?.sigla ?? '',
         ubmLogoDataUrl: ubm?.logoDataUrl,
-        eventoExtraordinario,
-        dataEvento: escala?.data ?? '',
-        localEvento: s.localEvento ?? '',
-        horario: s.modalidade === 'integral' ? '24h (integral)' : s.horarioParcial || 'Parcial',
-        militarSubstituidoNomeGuerra: solicitante?.nomeGuerra || solicitante?.nome || '',
-        militarSubstitutoNomeCompleto: militarIndicado ? `${militarIndicado.posto} ${militarIndicado.nome}`.trim() : indicado?.nome || '',
-        militarSubstitutoMatricula: militarIndicado?.matricula || indicado?.matricula || '',
-        observacao: OBSERVACAO_PADRAO,
-        responsavelNome: aprovador?.nome || '',
-        responsavelPosto: militarAprovador?.posto || '',
-        responsavelCargo: aprovador ? cargoAprovador : '',
+        servico,
+        dataServico: escala?.data ?? '',
+        horarioParcial: s.modalidade === 'parcial' ? s.horarioParcial : undefined,
+        autorizadoPosto: militarIndicado?.posto || '',
+        autorizadoNome: militarIndicado?.nome || indicado?.nome || '',
+        autorizadoNomeGuerra: militarIndicado?.nomeGuerra || indicado?.nomeGuerra || '',
+        autorizadoMatricula: militarIndicado?.matricula || indicado?.matricula || '',
+        substituidoPosto: militarSolicitante?.posto || '',
+        substituidoNome: militarSolicitante?.nome || solicitante?.nome || '',
+        substituidoNomeGuerra: militarSolicitante?.nomeGuerra || solicitante?.nomeGuerra || '',
+        substituidoMatricula: militarSolicitante?.matricula || solicitante?.matricula || '',
+        assinanteNome: aprovador?.nome || '',
+        assinanteNomeGuerra: aprovador?.nomeGuerra || militarAprovador?.nomeGuerra || '',
+        assinantePosto: militarAprovador?.posto || '',
+        assinanteCargo: aprovador ? cargoAprovador : '',
       });
     } finally {
       setGerandoPdfId(null);
