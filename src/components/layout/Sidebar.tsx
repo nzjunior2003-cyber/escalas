@@ -9,7 +9,12 @@ import {
   FileBarChart,
   PieChart,
   ShieldCheck,
+  Building2,
   Menu,
+  ListChecks,
+  Shield,
+  Radio,
+  BarChart3,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useApp } from '../../context/AppContext';
@@ -24,20 +29,32 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
   const location = useLocation();
   const { usuarioAtual } = useApp();
 
+  const isMaster = temPapel(usuarioAtual, 'master');
   const isComandante = temPapel(usuarioAtual, 'comandante');
   const isEscalante = temPapel(usuarioAtual, 'escalante');
   const isGestao = isComandante || isEscalante;
+  const isComando = temPapel(usuarioAtual, 'crb') || temPapel(usuarioAtual, 'cop');
+  // Um master "puro" (sem UBM) não opera escala/solicitações/presença de
+  // ninguém; mas se ele também acumula comandante/escalante numa UBM
+  // (papéis podem coexistir na mesma pessoa), esses módulos voltam a fazer
+  // sentido pra ele nessa UBM — daí checar o vínculo com a UBM, não o papel.
+  const temUbm = !!usuarioAtual?.ubmId;
 
   const navigation = [
     { name: 'Início', href: '/sistema', icon: Home, show: true },
     { name: 'Efetivo', href: '/sistema/efetivo', icon: Users, show: isGestao },
-    { name: 'Escala', href: '/sistema/escala', icon: CalendarDays, show: true },
-    { name: 'Solicitações', href: '/sistema/solicitacoes', icon: Send, show: true },
+    { name: 'Funções', href: '/sistema/funcoes', icon: ListChecks, show: isGestao },
+    { name: 'Escala', href: '/sistema/escala', icon: CalendarDays, show: temUbm },
+    { name: 'Solicitações', href: '/sistema/solicitacoes', icon: Send, show: temUbm },
     { name: 'Afastamentos', href: '/sistema/afastamentos', icon: UserX, show: isGestao },
-    { name: 'Presença', href: '/sistema/presenca', icon: ClipboardCheck, show: true },
-    { name: 'Relatórios', href: '/sistema/relatorios', icon: FileBarChart, show: isGestao },
+    { name: 'Presença', href: '/sistema/presenca', icon: ClipboardCheck, show: temUbm },
+    { name: 'Reforços', href: '/sistema/reforcos', icon: Radio, show: isComando || isGestao },
+    { name: 'Painel Regional', href: '/sistema/painel-regional', icon: BarChart3, show: isComando },
+    { name: 'Histórico', href: '/sistema/historico', icon: FileBarChart, show: isGestao },
     { name: 'Estatísticas', href: '/sistema/estatisticas', icon: PieChart, show: isGestao },
-    { name: 'Usuários', href: '/sistema/usuarios', icon: ShieldCheck, show: isGestao },
+    { name: 'Usuários', href: '/sistema/usuarios', icon: ShieldCheck, show: isGestao || isMaster },
+    { name: 'UBMs', href: '/sistema/ubms', icon: Building2, show: isMaster || isComandante },
+    { name: 'Comandos', href: '/sistema/comandos', icon: Shield, show: isMaster },
   ].filter((item) => item.show);
 
   return (

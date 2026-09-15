@@ -1,8 +1,9 @@
 /**
  * Layout esperado da planilha de efetivo (seção 3.1 do PRD): colunas
- * Nome, Posto/Graduação e Matrícula, em qualquer ordem, identificadas pelo
- * cabeçalho (aceita variações comuns de grafia/acentuação). Ajustar aqui
- * caso o layout real fornecido pela unidade seja diferente.
+ * Nome, Posto/Graduação (ou "Cargo", como no arquivo real "Militares e
+ * matrícula bm" fornecido pela unidade) e Matrícula (MF), em qualquer
+ * ordem, identificadas pelo cabeçalho (aceita variações comuns de
+ * grafia/acentuação).
  */
 export interface LinhaMilitar {
   nome: string;
@@ -12,8 +13,8 @@ export interface LinhaMilitar {
 
 const ALIAS_COLUNAS: Record<keyof LinhaMilitar, string[]> = {
   nome: ['nome', 'militar', 'nome completo'],
-  posto: ['posto', 'graduacao', 'graduação', 'posto/graduacao', 'posto/graduação'],
-  matricula: ['matricula', 'matrícula', 'matr', 'registro'],
+  posto: ['posto', 'graduacao', 'graduação', 'posto/graduacao', 'posto/graduação', 'cargo'],
+  matricula: ['matricula', 'matrícula', 'matr', 'registro', 'mf'],
 };
 
 function normalizarCabecalho(valor: string): string {
