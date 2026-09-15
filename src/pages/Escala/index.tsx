@@ -312,6 +312,7 @@ function FuncaoLinha({
 }) {
   const escalasDaFuncao = escalasDaSemana.filter((e) => e.funcao === funcao.id);
   const [adicionandoEm, setAdicionandoEm] = useState<string | null>(null);
+  const [trocandoId, setTrocandoId] = useState<string | null>(null);
 
   return (
     <Fragment>
@@ -383,31 +384,46 @@ function FuncaoLinha({
                   className={`bg-red-50 border border-red-100 rounded-md p-1.5 text-[11px] ${podeArrastar ? 'cursor-grab active:cursor-grabbing' : ''}`}
                   title={nomeCurto(militar)}
                 >
-                  <div className="flex items-start gap-1">
-                    <p className="font-medium text-red-900 leading-tight truncate flex-1">{nomeCurto(militar)}</p>
-                    {isEscalante && !travada && entrada.origem !== 'diferenciada' && (
-                      <button
-                        onClick={() => onRemover(entrada.id)}
-                        title="Remover"
-                        className="shrink-0 text-red-300 hover:text-red-700 p-0.5 -m-0.5"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                  {entrada.origem === 'diferenciada' && (
-                    <p className="text-[9px] uppercase text-amber-600 font-semibold">diferenciada</p>
-                  )}
-                  {isEscalante && !travada && entrada.origem !== 'diferenciada' && (
+                  {trocandoId === entrada.id ? (
                     <select
-                      className="mt-1 w-full text-[10px] border-gray-200 rounded"
-                      value={entrada.militarId}
-                      onChange={(ev) => updateEscalaOrdinaria(entrada.id, ev.target.value)}
+                      autoFocus
+                      className="w-full text-[10px] border-gray-300 rounded"
+                      defaultValue={entrada.militarId}
+                      onChange={(ev) => {
+                        setTrocandoId(null);
+                        if (ev.target.value !== entrada.militarId) updateEscalaOrdinaria(entrada.id, ev.target.value);
+                      }}
+                      onBlur={() => setTrocandoId(null)}
                     >
                       {candidatosDoCartao.map((m) => (
                         <option key={m.id} value={m.id}>{nomeCurto(m)}</option>
                       ))}
                     </select>
+                  ) : (
+                    <div className="flex items-start gap-1">
+                      <p className="font-medium text-red-900 leading-tight truncate flex-1">{nomeCurto(militar)}</p>
+                      {isEscalante && !travada && entrada.origem !== 'diferenciada' && candidatosDoCartao.length > 1 && (
+                        <button
+                          onClick={() => setTrocandoId(entrada.id)}
+                          title="Trocar militar"
+                          className="shrink-0 text-red-300 hover:text-red-700 p-0.5 -m-0.5"
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                        </button>
+                      )}
+                      {isEscalante && !travada && entrada.origem !== 'diferenciada' && (
+                        <button
+                          onClick={() => onRemover(entrada.id)}
+                          title="Remover"
+                          className="shrink-0 text-red-300 hover:text-red-700 p-0.5 -m-0.5"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {entrada.origem === 'diferenciada' && (
+                    <p className="text-[9px] uppercase text-amber-600 font-semibold">diferenciada</p>
                   )}
                 </div>
               );
