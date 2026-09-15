@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarDays, Plus, Sparkles, Lock, Megaphone, HandHeart, Trash2 } from 'lucide-react';
+import { CalendarDays, Plus, Sparkles, Lock, Megaphone, HandHeart, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, ordenarCandidatosExtraordinario, semanaInicioDe } from '../../lib/escala';
 import { STATUS_VAGA_VOLUNTARIA_LABELS, temPapel } from '../../types';
@@ -37,6 +37,7 @@ export default function Escala() {
     gerarEPersistirEscalaOrdinaria,
     updateEscalaOrdinaria,
     moverDataEscalaOrdinaria,
+    moverOrdemFuncao,
   } = useApp();
   const [aba, setAba] = useState<Aba>('ordinaria');
   const [granularidade, setGranularidade] = useState<Granularidade>('semanal');
@@ -49,7 +50,9 @@ export default function Escala() {
   const isEscalante = temPapel(usuarioAtual, 'escalante');
   const { inicio, fim, dias } = useMemo(() => intervaloPorGranularidade(granularidade, new Date()), [granularidade]);
 
-  const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
+  const funcoesDaUbm = funcoes
+    .filter((f) => f.ubmId === ubmId && f.ativa)
+    .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0) || String(a.criado_em ?? '').localeCompare(String(b.criado_em ?? '')));
   useEffect(() => {
     if (!funcaoSelecionada && funcoesDaUbm.length > 0) setFuncaoSelecionada(funcoesDaUbm[0].id);
   }, [funcaoSelecionada, funcoesDaUbm]);
@@ -189,7 +192,7 @@ export default function Escala() {
                   </div>
                 ))}
 
-                {funcoesDaUbm.map((f) => (
+                {funcoesDaUbm.map((f, indice) => (
                   <FuncaoLinha
                     key={f.id}
                     funcao={f}
@@ -205,6 +208,9 @@ export default function Escala() {
                     updateEscalaOrdinaria={updateEscalaOrdinaria}
                     gerando={gerandoFuncaoId === f.id}
                     onGerar={() => handleGerarFuncao(f.id)}
+                    podeSubir={indice > 0}
+                    podeDescer={indice < funcoesDaUbm.length - 1}
+                    onMover={(direcao) => moverOrdemFuncao(ubmId, f.id, direcao)}
                   />
                 ))}
               </div>
@@ -255,6 +261,13 @@ export default function Escala() {
  * filhos diretos do grid do componente pai (por isso o Fragment: não pode
  * envolver as células numa div, ou elas parariam de fazer parte do grid).
  */
+/** Posto + nome de guerra (ou nome completo, se ainda não tiver nome de guerra cadastrado) — mais curto que o nome completo, pra caber no cartão sem cortar. */
+function nomeCurto(militar?: Militar): string {
+  if (!militar) return 'Militar removido';
+  const nome = militar.nomeGuerra || militar.nome;
+  return militar.posto ? `${militar.posto} ${nome}` : nome;
+}
+
 function FuncaoLinha({
   funcao,
   dias,
@@ -269,6 +282,9 @@ function FuncaoLinha({
   updateEscalaOrdinaria,
   gerando,
   onGerar,
+  podeSubir,
+  podeDescer,
+  onMover,
 }: {
   funcao: FuncaoUbm;
   dias: string[];
@@ -283,13 +299,36 @@ function FuncaoLinha({
   updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
   gerando: boolean;
   onGerar: () => void;
+  podeSubir: boolean;
+  podeDescer: boolean;
+  onMover: (direcao: 'cima' | 'baixo') => void;
 }) {
   const escalasDaFuncao = escalasDaSemana.filter((e) => e.funcao === funcao.id);
 
   return (
     <Fragment>
-      <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 flex items-center justify-between gap-1 sticky left-0">
-        <span className="text-sm font-medium text-gray-800 truncate" title={funcao.nome}>{funcao.nome}</span>
+      <div className="bg-white border border-gray-200 rounded-lg px-2 py-2 flex items-center gap-1 sticky left-0">
+        {isEscalante && (
+          <div className="flex flex-col shrink-0 -my-1">
+            <button
+              onClick={() => onMover('cima')}
+              disabled={!podeSubir}
+              title="Mover função pra cima"
+              className="text-gray-300 hover:text-red-700 disabled:opacity-30 disabled:hover:text-gray-300 leading-none"
+            >
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => onMover('baixo')}
+              disabled={!podeDescer}
+              title="Mover função pra baixo"
+              className="text-gray-300 hover:text-red-700 disabled:opacity-30 disabled:hover:text-gray-300 leading-none"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+        <span className="text-sm font-medium text-gray-800 truncate flex-1" title={funcao.nome}>{funcao.nome}</span>
         {isEscalante && (
           <button
             onClick={onGerar}
@@ -323,20 +362,21 @@ function FuncaoLinha({
                 draggable={podeArrastar}
                 onDragStart={() => setArrastando({ id: entrada.id, funcao: funcao.id, data: entrada.data, militarId: entrada.militarId })}
                 onDragEnd={() => setArrastando(null)}
-                className={`bg-red-50 border border-red-100 rounded-md p-2 text-xs ${podeArrastar ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                className={`bg-red-50 border border-red-100 rounded-md p-1.5 text-[11px] ${podeArrastar ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                title={nomeCurto(militar)}
               >
-                <p className="font-medium text-red-900 truncate">{militar?.nome ?? 'Militar removido'}</p>
+                <p className="font-medium text-red-900 leading-tight truncate">{nomeCurto(militar)}</p>
                 {entrada.origem === 'diferenciada' && (
-                  <p className="text-[10px] uppercase text-amber-600 font-semibold">diferenciada</p>
+                  <p className="text-[9px] uppercase text-amber-600 font-semibold">diferenciada</p>
                 )}
                 {isEscalante && !travada && entrada.origem !== 'diferenciada' && (
                   <select
-                    className="mt-1 w-full text-[11px] border-gray-200 rounded"
+                    className="mt-1 w-full text-[10px] border-gray-200 rounded"
                     value={entrada.militarId}
                     onChange={(ev) => updateEscalaOrdinaria(entrada.id, ev.target.value)}
                   >
                     {militaresDaFuncao.map((m) => (
-                      <option key={m.id} value={m.id}>{m.nome}</option>
+                      <option key={m.id} value={m.id}>{nomeCurto(m)}</option>
                     ))}
                   </select>
                 )}

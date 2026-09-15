@@ -6,13 +6,21 @@ import { useApp } from '../context/AppContext';
 import type { LinhaMilitar } from '../lib/csvMilitares';
 import FormField from './ui/FormField';
 
-type ModalView = 'login' | 'solicitar' | 'esqueci' | 'completarCadastro';
+type ModalView = 'login' | 'buscarAcesso' | 'naoEncontrado' | 'esqueci' | 'completarCadastro';
 
 const SENHA_PADRAO_PRIMEIRO_ACESSO = '123456';
 
 export default function LoginModal({ onClose, embedded }: { onClose: () => void; embedded?: boolean }) {
-  const { login, solicitarAcesso, enviarResetSenha, validarMatriculaEfetivo, primeiroAcessoPorMatricula, firebaseConfigurado, ubms } =
-    useApp();
+  const {
+    login,
+    solicitarAcesso,
+    enviarResetSenha,
+    validarMatriculaEfetivo,
+    buscarMilitaresEfetivoPorNome,
+    primeiroAcessoPorMatricula,
+    firebaseConfigurado,
+    ubms,
+  } = useApp();
   const navigate = useNavigate();
 
   const [view, setView] = useState<ModalView>('login');
@@ -24,14 +32,19 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
   const [senha, setSenha] = useState('');
   const [emailEsqueci, setEmailEsqueci] = useState('');
 
-  // Solicitar acesso (autocadastro sem matrícula, ex.: quem não está na planilha)
+  // Buscar acesso (nome ou matrícula) — busca ativa na planilha antes de qualquer formulário.
+  const [buscaTermo, setBuscaTermo] = useState('');
+  const [multiplosEncontrados, setMultiplosEncontrados] = useState(false);
+
+  // Não encontrado na planilha — autocadastro manual, informado ao master pra incluir a pessoa.
   const [nome, setNome] = useState('');
+  const [matriculaDigitada, setMatriculaDigitada] = useState('');
   const [cargo, setCargo] = useState('');
   const [ubmId, setUbmId] = useState(ubms[0]?.id ?? '');
   const [newSenha, setNewSenha] = useState('');
   const [confirmSenha, setConfirmSenha] = useState('');
 
-  // Completar cadastro (primeiro acesso por matrícula, validado na planilha)
+  // Completar cadastro (encontrado na planilha, por matrícula ou nome)
   const [militarValidado, setMilitarValidado] = useState<LinhaMilitar | null>(null);
   const [nomeGuerra, setNomeGuerra] = useState('');
   const [cadastroUbmId, setCadastroUbmId] = useState(ubms[0]?.id ?? '');
@@ -42,6 +55,27 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
   const trocarView = (nova: ModalView) => {
     setErro(null);
     setView(nova);
+  };
+
+  const abrirCompletarCadastro = (linha: LinhaMilitar) => {
+    setMilitarValidado(linha);
+    setNomeGuerra('');
+    setCadastroUbmId(ubms[0]?.id ?? '');
+    setCadastroEmail('');
+    setCadastroSenha('');
+    setCadastroConfirmSenha('');
+    trocarView('completarCadastro');
+  };
+
+  const abrirNaoEncontrado = (dados: { nome?: string; matricula?: string }) => {
+    setNome(dados.nome ?? '');
+    setMatriculaDigitada(dados.matricula ?? '');
+    setCargo('');
+    setNomeGuerra('');
+    setUbmId(ubms[0]?.id ?? '');
+    setNewSenha('');
+    setConfirmSenha('');
+    trocarView('naoEncontrado');
   };
 
   const handleLogin = async (e: FormEvent) => {
@@ -61,12 +95,7 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
         try {
           const linha = await validarMatriculaEfetivo(identificador);
           if (linha) {
-            setMilitarValidado(linha);
-            setNomeGuerra('');
-            setCadastroEmail('');
-            setCadastroSenha('');
-            setCadastroConfirmSenha('');
-            trocarView('completarCadastro');
+            abrirCompletarCadastro(linha);
           } else {
             setErro('Matrícula não encontrada no efetivo do CBMPA. Verifique o número digitado.');
           }
@@ -81,7 +110,44 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
     }
   };
 
-  const handleSolicitar = async (e: FormEvent) => {
+  const handleBuscarAcesso = async (e: FormEvent) => {
+    e.preventDefault();
+    setErro(null);
+    setMultiplosEncontrados(false);
+    const termo = buscaTermo.trim();
+    if (!termo) {
+      setErro('Digite seu nome ou matrícula.');
+      return;
+    }
+
+    setAguardando(true);
+    try {
+      const souMatricula = !/[a-zA-ZÀ-ÿ]/.test(termo);
+      if (souMatricula) {
+        const linha = await validarMatriculaEfetivo(termo);
+        if (linha) {
+          abrirCompletarCadastro(linha);
+        } else {
+          abrirNaoEncontrado({ matricula: termo });
+        }
+      } else {
+        const linhas = await buscarMilitaresEfetivoPorNome(termo);
+        if (linhas.length === 1) {
+          abrirCompletarCadastro(linhas[0]);
+        } else if (linhas.length > 1) {
+          setMultiplosEncontrados(true);
+        } else {
+          abrirNaoEncontrado({ nome: termo });
+        }
+      }
+    } catch {
+      setErro('Não foi possível consultar a planilha de efetivo agora. Tente novamente em instantes.');
+    } finally {
+      setAguardando(false);
+    }
+  };
+
+  const handleNaoEncontradoSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErro(null);
 
@@ -100,8 +166,19 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
 
     setAguardando(true);
     try {
-      await solicitarAcesso({ nome, email: identificador, senha: newSenha, ubmId, cargo });
-      alert('Solicitação enviada com sucesso! Aguarde a aprovação do Comandante/Escalante da sua UBM.');
+      await solicitarAcesso({
+        nome,
+        nomeGuerra: nomeGuerra || undefined,
+        matricula: matriculaDigitada || undefined,
+        email: identificador,
+        senha: newSenha,
+        ubmId,
+        cargo,
+        naoEncontradoNaPlanilha: true,
+      });
+      alert(
+        'Solicitação enviada! Como você não consta na planilha de efetivo, também avisamos o master pra incluir seu cadastro. Aguarde a aprovação do Comandante/Escalante da sua UBM.',
+      );
       setNewSenha('');
       setConfirmSenha('');
       trocarView('login');
@@ -179,7 +256,8 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
         <div className={`flex items-center ${embedded ? 'justify-center pb-4 border-b border-gray-100 dark:border-slate-800' : 'justify-between p-6 border-b border-gray-100 dark:border-slate-800'}`}>
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">
             {view === 'login' && 'Acesso ao Sistema'}
-            {view === 'solicitar' && 'Solicitar Acesso'}
+            {view === 'buscarAcesso' && 'Buscar Acesso'}
+            {view === 'naoEncontrado' && 'Solicitar Acesso'}
             {view === 'esqueci' && 'Recuperar Senha'}
             {view === 'completarCadastro' && 'Completar Cadastro'}
           </h2>
@@ -237,9 +315,17 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
               {aguardando ? 'Entrando...' : 'Entrar'}
             </button>
             <div className="text-center mt-4 border-t border-gray-100 dark:border-slate-800 pt-4">
-              <p className="text-sm text-gray-600 dark:text-slate-400">Não está no efetivo cadastrado na planilha?</p>
-              <button type="button" onClick={() => trocarView('solicitar')} className="mt-2 w-full flex justify-center py-2 px-4 border border-red-200 dark:border-red-900 rounded-md shadow-sm text-sm font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950 hover:bg-red-100 dark:hover:bg-red-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
-                Solicitar Acesso Manualmente
+              <p className="text-sm text-gray-600 dark:text-slate-400">Ainda não tem acesso?</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setBuscaTermo('');
+                  setMultiplosEncontrados(false);
+                  trocarView('buscarAcesso');
+                }}
+                className="mt-2 w-full flex justify-center py-2 px-4 border border-red-200 dark:border-red-900 rounded-md shadow-sm text-sm font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950 hover:bg-red-100 dark:hover:bg-red-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
+              >
+                Buscar meu acesso
               </button>
             </div>
           </form>
@@ -285,10 +371,47 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
           </form>
         )}
 
-        {view === 'solicitar' && (
-          <form onSubmit={handleSolicitar} className={`${embedded ? "pt-4" : "p-6"} space-y-4`}>
+        {view === 'buscarAcesso' && (
+          <form onSubmit={handleBuscarAcesso} className={`${embedded ? "pt-4" : "p-6"} space-y-4`}>
+            <p className="text-sm text-gray-600 dark:text-slate-400">
+              Digite seu nome ou matrícula (MF) — vamos conferir se você já consta na planilha de efetivo do CBMPA.
+            </p>
+            <FormField
+              label="Nome ou Matrícula"
+              icon={IdCard}
+              type="text"
+              required
+              value={buscaTermo}
+              onChange={(e) => setBuscaTermo(e.target.value)}
+              placeholder="Seu nome completo ou sua matrícula"
+            />
+            {multiplosEncontrados && (
+              <div className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 p-3 text-sm text-amber-800 dark:text-amber-300">
+                Encontramos mais de um militar com esse nome na planilha. Digite sua matrícula (MF) pra identificar certinho.
+              </div>
+            )}
+            <button type="submit" disabled={aguardando} className={classeBotaoPrimario}>
+              {aguardando ? 'Buscando...' : 'Buscar'}
+            </button>
+            <div className="text-center mt-2">
+              <button type="button" onClick={() => trocarView('login')} className="text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white">
+                Voltar para o Login
+              </button>
+            </div>
+          </form>
+        )}
+
+        {view === 'naoEncontrado' && (
+          <form onSubmit={handleNaoEncontradoSubmit} className={`${embedded ? "pt-4" : "p-6"} space-y-4`}>
+            <div className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 p-3 text-sm text-amber-800 dark:text-amber-300">
+              Não encontramos você na planilha de efetivo. Preencha seus dados abaixo — vamos avisar o master pra incluir seu cadastro, além do Comandante/Escalante da sua UBM pra aprovar o acesso.
+            </div>
             <FormField label="Nome Completo" icon={User} type="text" required value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome completo" />
-            <FormField label="Posto/Graduação" icon={Briefcase} type="text" required value={cargo} onChange={(e) => setCargo(e.target.value)} placeholder="Ex: 1º TEN QOABM" />
+            <FormField label="Nome de Guerra" icon={User} type="text" value={nomeGuerra} onChange={(e) => setNomeGuerra(e.target.value)} placeholder="Como você é chamado no dia a dia" />
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label="Matrícula (MF)" icon={IdCard} type="text" value={matriculaDigitada} onChange={(e) => setMatriculaDigitada(e.target.value)} placeholder="Se souber" />
+              <FormField label="Posto/Graduação" icon={Briefcase} type="text" required value={cargo} onChange={(e) => setCargo(e.target.value)} placeholder="Ex: 1º TEN QOABM" />
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">UBM</label>
               <select value={ubmId} onChange={(e) => setUbmId(e.target.value)} required className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 sm:text-sm">
@@ -314,10 +437,10 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
             <div className="text-center mt-2">
               <button
                 type="button"
-                onClick={() => trocarView('login')}
+                onClick={() => trocarView('buscarAcesso')}
                 className="text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white"
               >
-                Voltar para o Login
+                Voltar pra busca
               </button>
             </div>
           </form>

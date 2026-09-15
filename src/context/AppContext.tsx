@@ -48,7 +48,7 @@ import {
   sugerirMilitarExtraordinario,
   temFolga24hAntes,
 } from '../lib/escala';
-import { buscarMilitarPorMatricula, normalizarMatricula } from '../lib/planilhaEfetivo';
+import { buscarMilitarPorMatricula, buscarMilitaresPorNome, normalizarMatricula } from '../lib/planilhaEfetivo';
 import type { LinhaMilitar } from '../lib/csvMilitares';
 import {
   Afastamento,
@@ -103,10 +103,20 @@ interface AppContextData {
   /** `identificador` aceita e-mail ou matrícula (resolvida via coleção `matriculas`). */
   login: (identificador: string, senha?: string) => Promise<void>;
   logout: () => Promise<void>;
-  solicitarAcesso: (dados: { nome: string; email: string; senha: string; ubmId: string; cargo?: string }) => Promise<void>;
+  solicitarAcesso: (dados: {
+    nome: string;
+    nomeGuerra?: string;
+    matricula?: string;
+    email: string;
+    senha: string;
+    ubmId: string;
+    cargo?: string;
+    naoEncontradoNaPlanilha?: boolean;
+  }) => Promise<void>;
   enviarResetSenha: (email: string) => Promise<void>;
   /** Confere a matrícula contra a planilha ao vivo do efetivo do CBMPA. */
   validarMatriculaEfetivo: (matricula: string) => Promise<LinhaMilitar | null>;
+  buscarMilitaresEfetivoPorNome: (nome: string) => Promise<LinhaMilitar[]>;
   /** Completa o primeiro acesso de um militar já validado pela matrícula. */
   primeiroAcessoPorMatricula: (dados: {
     matricula: string;
@@ -140,6 +150,7 @@ interface AppContextData {
   addFuncao: (dados: { ubmId: string; nome: string }) => Promise<string>;
   updateFuncao: (id: string, dados: Partial<Pick<FuncaoUbm, 'nome' | 'ativa'>>) => Promise<void>;
   deleteFuncao: (id: string) => Promise<void>;
+  moverOrdemFuncao: (ubmId: string, funcaoId: string, direcao: 'cima' | 'baixo') => Promise<void>;
 
   gerarEPersistirEscalaOrdinaria: (params: { ubmId: string; funcao: string; dataInicio: string; dataFim: string }) => Promise<number>;
   updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
@@ -447,8 +458,59 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [],
   );
 
+  /**
+   * Avisa por e-mail todo mundo com papel 'master' quando alguém pede acesso
+   * mas não foi encontrado na planilha de efetivo — pra incluírem a pessoa
+   * lá. Por e-mail (não alerta in-app via `notificar`) pelo mesmo motivo de
+   * `notificarAprovadoresDaUbm`: nesse momento a conta recém-criada ainda
+   * está com `ativo: false`, e a regra do Firestore para criar alertas
+   * exige `ativo()` — só e-mail funciona antes da aprovação.
+   */
+  const notificarMasterSobreNaoEncontrado = useCallback(
+    async (dados: { nome: string; matricula?: string; cargo?: string; email: string }) => {
+      try {
+        const db = requireDb();
+        const mastersSnap = await getDocs(
+          query(collection(db, 'usuarios'), where('papeis', 'array-contains', 'master')),
+        );
+        const masters = mastersSnap.docs.map((d) => ({ ...(d.data() as object), id: d.id }) as Usuario);
+        const detalhes = [dados.cargo, dados.matricula ? `MF ${dados.matricula}` : undefined].filter(Boolean).join(' — ');
+        await Promise.all(
+          masters.map((m) =>
+            enviarEmail({
+              to: m.email,
+              subject: `Militar não encontrado na planilha — ${dados.nome}`,
+              html: `<h2>Solicitação de acesso sem correspondência na planilha</h2><p><b>${dados.nome}</b>${detalhes ? ` (${detalhes})` : ''} pediu acesso ao Sistema de Jornada de Trabalho com o e-mail <b>${dados.email}</b>, mas não foi encontrado na planilha de efetivo.</p><p>Inclua a pessoa na planilha e/ou aprove o acesso manualmente no módulo <b>Usuários</b>.</p>`,
+            }).catch((erroEnvio) => console.error('Erro ao notificar master:', erroEnvio)),
+          ),
+        );
+      } catch (erroNotificacao) {
+        console.error('Erro ao buscar masters para notificar militar não encontrado na planilha:', erroNotificacao);
+      }
+    },
+    [],
+  );
+
   const solicitarAcesso = useCallback(
-    async ({ nome, email, senha, ubmId, cargo }: { nome: string; email: string; senha: string; ubmId: string; cargo?: string }) => {
+    async ({
+      nome,
+      nomeGuerra,
+      matricula,
+      email,
+      senha,
+      ubmId,
+      cargo,
+      naoEncontradoNaPlanilha,
+    }: {
+      nome: string;
+      nomeGuerra?: string;
+      matricula?: string;
+      email: string;
+      senha: string;
+      ubmId: string;
+      cargo?: string;
+      naoEncontradoNaPlanilha?: boolean;
+    }) => {
       try {
         const auth = requireFirebaseAuth();
         const db = requireDb();
@@ -456,6 +518,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
         await setDoc(doc(db, 'usuarios', credencial.user.uid), {
           nome,
+          ...(nomeGuerra ? { nomeGuerra } : {}),
+          ...(matricula ? { matricula } : {}),
           email,
           cargo: cargo ?? '',
           ubmId,
@@ -465,16 +529,23 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         });
 
         await notificarAprovadoresDaUbm(ubmId, nome, email, cargo);
+        if (naoEncontradoNaPlanilha) {
+          await notificarMasterSobreNaoEncontrado({ nome, matricula, cargo, email });
+        }
         await signOut(auth);
       } catch (erro) {
         throw new Error(mensagemErroAuth(erro));
       }
     },
-    [notificarAprovadoresDaUbm],
+    [notificarAprovadoresDaUbm, notificarMasterSobreNaoEncontrado],
   );
 
   const validarMatriculaEfetivo = useCallback(async (matricula: string) => {
     return buscarMilitarPorMatricula(matricula);
+  }, []);
+
+  const buscarMilitaresEfetivoPorNome = useCallback(async (nome: string) => {
+    return buscarMilitaresPorNome(nome);
   }, []);
 
   /**
@@ -598,16 +669,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // --- Funções operacionais (cadastro por UBM) ------------------------------
-  const addFuncao = useCallback(async (dados: { ubmId: string; nome: string }) => {
-    const db = requireDb();
-    const ref = await addDoc(collection(db, 'funcoes'), {
-      ubmId: dados.ubmId,
-      nome: dados.nome,
-      ativa: true,
-      criado_em: new Date().toISOString(),
-    });
-    return ref.id;
-  }, []);
+  const addFuncao = useCallback(
+    async (dados: { ubmId: string; nome: string }) => {
+      const db = requireDb();
+      const ref = await addDoc(collection(db, 'funcoes'), {
+        ubmId: dados.ubmId,
+        nome: dados.nome,
+        ativa: true,
+        ordem: funcoes.filter((f) => f.ubmId === dados.ubmId).length,
+        criado_em: new Date().toISOString(),
+      });
+      return ref.id;
+    },
+    [funcoes],
+  );
 
   const updateFuncao = useCallback(async (id: string, dados: Partial<Pick<FuncaoUbm, 'nome' | 'ativa'>>) => {
     const db = requireDb();
@@ -618,6 +693,27 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const db = requireDb();
     await deleteDoc(doc(db, 'funcoes', id));
   }, []);
+
+  /** Reordena as funções da UBM (setinhas pra cima/baixo no Kanban) — troca a posição com a vizinha e regrava `ordem` de todas, pra nunca depender de valores antigos/ausentes. */
+  const moverOrdemFuncao = useCallback(
+    async (ubmId: string, funcaoId: string, direcao: 'cima' | 'baixo') => {
+      const db = requireDb();
+      const daUbm = funcoes
+        .filter((f) => f.ubmId === ubmId)
+        .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0) || String(a.criado_em ?? '').localeCompare(String(b.criado_em ?? '')));
+      const indice = daUbm.findIndex((f) => f.id === funcaoId);
+      const alvo = direcao === 'cima' ? indice - 1 : indice + 1;
+      if (indice === -1 || alvo < 0 || alvo >= daUbm.length) return;
+
+      const reordenada = [...daUbm];
+      [reordenada[indice], reordenada[alvo]] = [reordenada[alvo], reordenada[indice]];
+
+      const batch = writeBatch(db);
+      reordenada.forEach((f, i) => batch.update(doc(db, 'funcoes', f.id), { ordem: i }));
+      await batch.commit();
+    },
+    [funcoes],
+  );
 
   // --- Usuários (aprovação de cadastro, perfis) -----------------------------
   const updateUsuario = useCallback(async (id: string, dados: Partial<Usuario>) => {
@@ -1469,6 +1565,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       solicitarAcesso,
       enviarResetSenha,
       validarMatriculaEfetivo,
+      buscarMilitaresEfetivoPorNome,
       primeiroAcessoPorMatricula,
       addUbm,
       updateUbm,
@@ -1486,6 +1583,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       addFuncao,
       updateFuncao,
       deleteFuncao,
+      moverOrdemFuncao,
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
       moverDataEscalaOrdinaria,
@@ -1538,6 +1636,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       solicitarAcesso,
       enviarResetSenha,
       validarMatriculaEfetivo,
+      buscarMilitaresEfetivoPorNome,
       primeiroAcessoPorMatricula,
       addUbm,
       updateUbm,
@@ -1555,6 +1654,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       addFuncao,
       updateFuncao,
       deleteFuncao,
+      moverOrdemFuncao,
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
       moverDataEscalaOrdinaria,

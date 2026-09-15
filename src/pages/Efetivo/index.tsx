@@ -148,7 +148,7 @@ export default function Efetivo() {
               <div key={m.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 sm:px-6 py-3 hover:bg-gray-50">
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium text-gray-900">{m.posto} {m.nome}</div>
-                  <div className="text-sm text-gray-500">Matr. {m.matricula || '—'}</div>
+                  <div className="text-sm text-gray-500">Matr. {m.matricula || '—'}{m.nomeGuerra ? ` · Nome de guerra: ${m.nomeGuerra}` : ''}</div>
                   <div className="flex flex-wrap gap-1 mt-1.5 items-center">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${m.ativo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                       {m.ativo ? 'Ativo' : 'Inativo'}
@@ -165,7 +165,7 @@ export default function Efetivo() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto text-sm font-medium">
-                  <button onClick={() => setMilitarEditando(m)} className="p-2 -m-2 text-red-600 hover:text-red-900" title="Editar funções">
+                  <button onClick={() => setMilitarEditando(m)} className="p-2 -m-2 text-red-600 hover:text-red-900" title="Editar">
                     <Edit2 className="w-4 h-4" />
                   </button>
                   <button onClick={() => setTransferindo(m)} className="p-2 -m-2 text-gray-500 hover:text-gray-800" title="Transferir de UBM">
@@ -188,6 +188,21 @@ export default function Efetivo() {
               <X className="w-5 h-5" />
             </button>
             <h3 className="text-lg font-medium text-gray-900 mb-1">{militarEditando.posto} {militarEditando.nome}</h3>
+
+            <label className="block text-xs font-medium text-gray-500 mb-1 mt-4">Nome de guerra</label>
+            <input
+              type="text"
+              defaultValue={militarEditando.nomeGuerra ?? ''}
+              placeholder="Como o militar é chamado no dia a dia"
+              className="w-full border border-gray-300 rounded-md text-sm py-2 px-3 mb-4"
+              onBlur={(e) => {
+                const valor = e.target.value.trim();
+                if (valor === (militarEditando.nomeGuerra ?? '')) return;
+                updateMilitar(militarEditando.id, { nomeGuerra: valor || undefined });
+                setMilitarEditando((atual) => (atual ? { ...atual, nomeGuerra: valor || undefined } : atual));
+              }}
+            />
+
             <p className="text-sm text-gray-500 mb-4">Funções operacionais (um militar pode acumular mais de uma)</p>
             <div className="space-y-2">
               {funcoesDaUbm.length === 0 ? (

@@ -60,3 +60,24 @@ export async function buscarMilitarPorMatricula(matricula: string): Promise<Linh
   const linhas = await buscarEfetivoDaPlanilha();
   return linhas.find((l) => l.matricula && normalizarMatricula(l.matricula) === alvo) ?? null;
 }
+
+function normalizarNome(nome: string): string {
+  return nome
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Busca por nome (sem precisar da matrícula) contra a planilha ao vivo —
+ * usada na tela de solicitar acesso, quando a pessoa não sabe/não tem a
+ * matrícula em mãos. Casamento por "contém" (não precisa ser o nome
+ * completo exato), pode retornar mais de um resultado.
+ */
+export async function buscarMilitaresPorNome(nome: string): Promise<LinhaMilitar[]> {
+  const alvo = normalizarNome(nome);
+  if (!alvo) return [];
+  const linhas = await buscarEfetivoDaPlanilha();
+  return linhas.filter((l) => normalizarNome(l.nome).includes(alvo));
+}

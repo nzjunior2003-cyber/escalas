@@ -123,6 +123,8 @@ export interface FuncaoUbm {
   ubmId: string;
   nome: string;
   ativa: boolean;
+  /** Posição de exibição entre as funções da mesma UBM (menor primeiro) — reordenável pelo escalante. */
+  ordem?: number;
   criado_em: string;
 }
 
@@ -136,6 +138,8 @@ export interface VinculoUbm {
 export interface Militar {
   id: string;
   nome: string;
+  /** Nome de guerra — como o militar é chamado no dia a dia. Editável pelo escalante em Efetivo; usado nos cartões da escala (posto + nome de guerra) pra caber mais gente sem cortar o texto. */
+  nomeGuerra?: string;
   posto: string;
   matricula: string;
   /** UBM atual (vínculo em aberto no histórico). */
@@ -521,6 +525,7 @@ export type TipoAlerta =
   | 'reforco_atendido'
   | 'vaga_voluntaria_disponivel'
   | 'vaga_voluntaria_resolvida'
+  | 'militar_nao_encontrado_na_planilha'
   | 'geral';
 
 export interface Alerta {

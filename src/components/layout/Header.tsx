@@ -16,9 +16,9 @@ export default function Header({ sidebarOpen, setSidebarOpen }: HeaderProps) {
   return (
     <header className="flex-shrink-0 min-h-20 bg-red-800 text-white shadow-md border-b-2 border-amber-400 z-20 relative">
       <div className="flex items-stretch justify-between min-h-20 relative z-10 w-full">
-        <div className="flex items-center h-full flex-1">
+        <div className="flex items-stretch flex-1">
           <div
-            className={`bg-white dark:bg-slate-900 flex items-center justify-center h-full px-6 sm:px-8 shadow-sm relative transition-all duration-300 w-fit ${sidebarOpen ? 'md:w-64' : ''}`}
+            className={`bg-white dark:bg-slate-900 flex items-center justify-center px-6 sm:px-8 shadow-sm relative transition-all duration-300 w-fit ${sidebarOpen ? 'md:w-64' : ''}`}
           >
             <button
               type="button"
@@ -36,7 +36,7 @@ export default function Header({ sidebarOpen, setSidebarOpen }: HeaderProps) {
             />
           </div>
 
-          <div className="flex flex-col justify-center ml-3 sm:ml-4 py-2 min-w-0">
+          <div className="flex flex-col justify-center ml-3 sm:ml-4 min-w-0">
             <span className="text-xs sm:text-base font-bold leading-snug">Corpo de Bombeiros Militar do Pará e</span>
             <span className="text-xs sm:text-base font-bold leading-snug">Coordenadoria Estadual de Proteção e Defesa Civil</span>
           </div>
