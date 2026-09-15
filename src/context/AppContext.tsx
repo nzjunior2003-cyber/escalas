@@ -155,6 +155,7 @@ interface AppContextData {
   gerarEPersistirEscalaOrdinaria: (params: { ubmId: string; funcao: string; dataInicio: string; dataFim: string }) => Promise<number>;
   updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
   moverDataEscalaOrdinaria: (id: string, novaData: string) => Promise<void>;
+  adicionarEscalaOrdinaria: (dados: { ubmId: string; funcao: string; data: string; militarId: string }) => Promise<void>;
   deleteEscalaOrdinaria: (id: string) => Promise<void>;
 
   criarEscalaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; militarIdEscolhido?: string }) => Promise<string>;
@@ -865,7 +866,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     await updateDoc(doc(db, 'escalas_ordinarias', id), { militarId, origem: 'manual' });
   }, []);
 
-  /** Kanban por função: mover um cartão pra um dia sem escala ainda (dia com escala existente usa updateEscalaOrdinaria duas vezes — troca de militarId — pra não duplicar/apagar registros). */
+  /**
+   * Kanban por função: mais de um militar pode estar escalado na mesma
+   * função no mesmo dia (cada um é o seu próprio cartão) — arrastar um
+   * cartão pra outro dia sempre MOVE (nunca troca de lugar com quem já
+   * estiver lá, já que os dois podem coexistir na célula de destino).
+   */
   const moverDataEscalaOrdinaria = useCallback(async (id: string, novaData: string) => {
     const db = requireDb();
     await updateDoc(doc(db, 'escalas_ordinarias', id), { data: novaData, origem: 'manual' });
@@ -874,6 +880,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const deleteEscalaOrdinaria = useCallback(async (id: string) => {
     const db = requireDb();
     await deleteDoc(doc(db, 'escalas_ordinarias', id));
+  }, []);
+
+  /** Kanban por função: adiciona mais um militar numa função+dia que já tem gente (ou começa vazia) — sem mexer nos cartões que já estavam lá. */
+  const adicionarEscalaOrdinaria = useCallback(async (dados: { ubmId: string; funcao: string; data: string; militarId: string }) => {
+    const db = requireDb();
+    await addDoc(collection(db, 'escalas_ordinarias'), {
+      ...dados,
+      origem: 'manual' as EscalaOrdinaria['origem'],
+      criado_em: new Date().toISOString(),
+    });
   }, []);
 
   // --- Escala extraordinária ---------------------------------------------
@@ -1587,6 +1603,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
       moverDataEscalaOrdinaria,
+      adicionarEscalaOrdinaria,
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
@@ -1658,6 +1675,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
       moverDataEscalaOrdinaria,
+      adicionarEscalaOrdinaria,
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,

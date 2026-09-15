@@ -37,6 +37,8 @@ export default function Escala() {
     gerarEPersistirEscalaOrdinaria,
     updateEscalaOrdinaria,
     moverDataEscalaOrdinaria,
+    adicionarEscalaOrdinaria,
+    deleteEscalaOrdinaria,
     moverOrdemFuncao,
   } = useApp();
   const [aba, setAba] = useState<Aba>('ordinaria');
@@ -101,19 +103,18 @@ export default function Escala() {
     (e) => e.ubmId === ubmId && dias.includes(e.data) && funcoesDaUbm.some((f) => f.id === e.funcao),
   );
 
-  const handleSoltar = async (funcaoId: string, dia: string, entradaDestino: (typeof escalasDaSemana)[number] | undefined) => {
+  const handleSoltar = async (funcaoId: string, dia: string, entradasDestino: EscalaOrdinaria[]) => {
     const origem = arrastando;
     setArrastando(null);
     if (!origem) return;
     if (origem.funcao !== funcaoId || origem.data === dia) return;
     if (estaTravada(dia) || estaTravada(origem.data)) return;
+    if (entradasDestino.some((e) => e.militarId === origem.militarId)) {
+      alert('Esse militar já está escalado nessa função nesse dia.');
+      return;
+    }
     try {
-      if (entradaDestino) {
-        await updateEscalaOrdinaria(origem.id, entradaDestino.militarId);
-        await updateEscalaOrdinaria(entradaDestino.id, origem.militarId);
-      } else {
-        await moverDataEscalaOrdinaria(origem.id, dia);
-      }
+      await moverDataEscalaOrdinaria(origem.id, dia);
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível mover essa escala.');
     }
@@ -206,6 +207,8 @@ export default function Escala() {
                     setArrastando={setArrastando}
                     onSoltar={handleSoltar}
                     updateEscalaOrdinaria={updateEscalaOrdinaria}
+                    onAdicionar={(militarId, data) => adicionarEscalaOrdinaria({ ubmId, funcao: f.id, data, militarId })}
+                    onRemover={deleteEscalaOrdinaria}
                     gerando={gerandoFuncaoId === f.id}
                     onGerar={() => handleGerarFuncao(f.id)}
                     podeSubir={indice > 0}
@@ -216,7 +219,7 @@ export default function Escala() {
               </div>
               {isEscalante && (
                 <p className="text-xs text-gray-400 mt-2">
-                  Arraste um militar pra outro dia (troca de lugar com quem já estiver lá) ou use o seletor no cartão — em telas sem mouse, use o seletor.
+                  Mais de um militar pode estar na mesma função no mesmo dia — use o "+" pra adicionar, arraste um cartão pra mudar de dia, ou use o seletor no cartão pra trocar quem está nele.
                 </p>
               )}
             </div>
@@ -280,6 +283,8 @@ function FuncaoLinha({
   setArrastando,
   onSoltar,
   updateEscalaOrdinaria,
+  onAdicionar,
+  onRemover,
   gerando,
   onGerar,
   podeSubir,
@@ -295,8 +300,10 @@ function FuncaoLinha({
   estaTravada: (data: string) => boolean;
   arrastando: { id: string; funcao: string; data: string; militarId: string } | null;
   setArrastando: (v: { id: string; funcao: string; data: string; militarId: string } | null) => void;
-  onSoltar: (funcaoId: string, dia: string, entradaDestino: EscalaOrdinaria | undefined) => void;
+  onSoltar: (funcaoId: string, dia: string, entradasDestino: EscalaOrdinaria[]) => void;
   updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
+  onAdicionar: (militarId: string, data: string) => Promise<void>;
+  onRemover: (id: string) => Promise<void>;
   gerando: boolean;
   onGerar: () => void;
   podeSubir: boolean;
@@ -304,6 +311,7 @@ function FuncaoLinha({
   onMover: (direcao: 'cima' | 'baixo') => void;
 }) {
   const escalasDaFuncao = escalasDaSemana.filter((e) => e.funcao === funcao.id);
+  const [adicionandoEm, setAdicionandoEm] = useState<string | null>(null);
 
   return (
     <Fragment>
@@ -342,11 +350,11 @@ function FuncaoLinha({
       </div>
 
       {dias.map((dia) => {
-        const entrada = escalasDaFuncao.find((e) => e.data === dia);
-        const militar = entrada ? militares.find((m) => m.id === entrada.militarId) : undefined;
+        const entradas = escalasDaFuncao.filter((e) => e.data === dia);
         const travada = estaTravada(dia);
-        const podeArrastar = isEscalante && !travada && !!entrada && entrada.origem !== 'diferenciada';
         const podeSoltarAqui = isEscalante && !travada && !!arrastando && arrastando.funcao === funcao.id && arrastando.data !== dia;
+        const candidatosParaAdicionar = militaresDaFuncao.filter((m) => !entradas.some((e) => e.militarId === m.id));
+        const emAdicao = adicionandoEm === dia;
 
         return (
           <div
@@ -354,35 +362,84 @@ function FuncaoLinha({
             onDragOver={(ev) => {
               if (podeSoltarAqui) ev.preventDefault();
             }}
-            onDrop={() => onSoltar(funcao.id, dia, entrada)}
-            className={`min-h-[64px] rounded-lg p-1.5 border border-dashed ${podeSoltarAqui ? 'border-red-300 bg-red-50/50' : 'border-gray-200 bg-gray-50'}`}
+            onDrop={() => onSoltar(funcao.id, dia, entradas)}
+            className={`min-h-[64px] rounded-lg p-1.5 border border-dashed space-y-1 ${podeSoltarAqui ? 'border-red-300 bg-red-50/50' : 'border-gray-200 bg-gray-50'}`}
           >
-            {entrada ? (
-              <div
-                draggable={podeArrastar}
-                onDragStart={() => setArrastando({ id: entrada.id, funcao: funcao.id, data: entrada.data, militarId: entrada.militarId })}
-                onDragEnd={() => setArrastando(null)}
-                className={`bg-red-50 border border-red-100 rounded-md p-1.5 text-[11px] ${podeArrastar ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                title={nomeCurto(militar)}
-              >
-                <p className="font-medium text-red-900 leading-tight truncate">{nomeCurto(militar)}</p>
-                {entrada.origem === 'diferenciada' && (
-                  <p className="text-[9px] uppercase text-amber-600 font-semibold">diferenciada</p>
-                )}
-                {isEscalante && !travada && entrada.origem !== 'diferenciada' && (
-                  <select
-                    className="mt-1 w-full text-[10px] border-gray-200 rounded"
-                    value={entrada.militarId}
-                    onChange={(ev) => updateEscalaOrdinaria(entrada.id, ev.target.value)}
-                  >
-                    {militaresDaFuncao.map((m) => (
-                      <option key={m.id} value={m.id}>{nomeCurto(m)}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            ) : (
-              <p className="text-[11px] text-gray-300 text-center pt-5">Sem escala</p>
+            {entradas.length === 0 && !isEscalante && <p className="text-[11px] text-gray-300 text-center pt-5">Sem escala</p>}
+
+            {entradas.map((entrada) => {
+              const militar = militares.find((m) => m.id === entrada.militarId);
+              const podeArrastar = isEscalante && !travada && entrada.origem !== 'diferenciada';
+              const candidatosDoCartao = [militar, ...militaresDaFuncao.filter((m) => m.id !== entrada.militarId)].filter(
+                (m): m is Militar => !!m,
+              );
+
+              return (
+                <div
+                  key={entrada.id}
+                  draggable={podeArrastar}
+                  onDragStart={() => setArrastando({ id: entrada.id, funcao: funcao.id, data: entrada.data, militarId: entrada.militarId })}
+                  onDragEnd={() => setArrastando(null)}
+                  className={`bg-red-50 border border-red-100 rounded-md p-1.5 text-[11px] ${podeArrastar ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                  title={nomeCurto(militar)}
+                >
+                  <div className="flex items-start gap-1">
+                    <p className="font-medium text-red-900 leading-tight truncate flex-1">{nomeCurto(militar)}</p>
+                    {isEscalante && !travada && entrada.origem !== 'diferenciada' && (
+                      <button
+                        onClick={() => onRemover(entrada.id)}
+                        title="Remover"
+                        className="shrink-0 text-red-300 hover:text-red-700 p-0.5 -m-0.5"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                  {entrada.origem === 'diferenciada' && (
+                    <p className="text-[9px] uppercase text-amber-600 font-semibold">diferenciada</p>
+                  )}
+                  {isEscalante && !travada && entrada.origem !== 'diferenciada' && (
+                    <select
+                      className="mt-1 w-full text-[10px] border-gray-200 rounded"
+                      value={entrada.militarId}
+                      onChange={(ev) => updateEscalaOrdinaria(entrada.id, ev.target.value)}
+                    >
+                      {candidatosDoCartao.map((m) => (
+                        <option key={m.id} value={m.id}>{nomeCurto(m)}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              );
+            })}
+
+            {isEscalante && !travada && (
+              emAdicao ? (
+                <select
+                  autoFocus
+                  className="w-full text-[10px] border-gray-300 rounded"
+                  defaultValue=""
+                  onChange={(ev) => {
+                    const militarId = ev.target.value;
+                    setAdicionandoEm(null);
+                    if (militarId) onAdicionar(militarId, dia);
+                  }}
+                  onBlur={() => setAdicionandoEm(null)}
+                >
+                  <option value="" disabled>Escolher militar...</option>
+                  {candidatosParaAdicionar.map((m) => (
+                    <option key={m.id} value={m.id}>{nomeCurto(m)}</option>
+                  ))}
+                </select>
+              ) : (
+                <button
+                  onClick={() => setAdicionandoEm(dia)}
+                  disabled={candidatosParaAdicionar.length === 0}
+                  className="w-full text-[11px] text-gray-400 hover:text-red-700 disabled:opacity-30 border border-dashed border-gray-300 rounded-md py-1"
+                >
+                  + Adicionar
+                </button>
+              )
             )}
           </div>
         );
