@@ -69,7 +69,13 @@ service cloud.firestore {
         && !('senha' in request.resource.data);
 
       // Master: controle total (é quem define/remove master/comandante/escalante).
-      allow create, update, delete: if master() && !('senha' in request.resource.data);
+      // `delete` fica numa cláusula separada porque, numa exclusão,
+      // `request.resource` é nulo — testar `request.resource.data` aqui
+      // travava em erro de avaliação e negava a exclusão sempre, mesmo pro
+      // master (só funcionava quando ele também era Comandante/Escalante
+      // daquela UBM específica, via `gestaoDaUbm` abaixo).
+      allow create, update: if master() && !('senha' in request.resource.data);
+      allow delete: if master();
 
       // Comandante/Escalante: só dentro da própria UBM, e nunca atribuindo
       // (nem removendo de quem já tem) papel de master/comandante/escalante —
