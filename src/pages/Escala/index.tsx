@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -6,6 +6,7 @@ import { CalendarDays, Plus, Sparkles, Lock, Megaphone, HandHeart, Trash2 } from
 import { useApp } from '../../context/AppContext';
 import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, ordenarCandidatosExtraordinario, semanaInicioDe } from '../../lib/escala';
 import { STATUS_VAGA_VOLUNTARIA_LABELS, temPapel } from '../../types';
+import type { EscalaOrdinaria, FuncaoUbm, Militar } from '../../types';
 
 type Aba = 'ordinaria' | 'extraordinaria' | 'diferenciada';
 type Granularidade = 'semanal' | 'mensal' | 'anual';
@@ -27,11 +28,22 @@ function intervaloPorGranularidade(granularidade: Granularidade, base: Date): { 
 }
 
 export default function Escala() {
-  const { usuarioAtual, militares, funcoes, escalasOrdinarias, fechamentosEscala, gerarEPersistirEscalaOrdinaria, updateEscalaOrdinaria } = useApp();
+  const {
+    usuarioAtual,
+    militares,
+    funcoes,
+    escalasOrdinarias,
+    fechamentosEscala,
+    gerarEPersistirEscalaOrdinaria,
+    updateEscalaOrdinaria,
+    moverDataEscalaOrdinaria,
+  } = useApp();
   const [aba, setAba] = useState<Aba>('ordinaria');
   const [granularidade, setGranularidade] = useState<Granularidade>('semanal');
   const [funcaoSelecionada, setFuncaoSelecionada] = useState<string>('');
   const [gerando, setGerando] = useState(false);
+  const [gerandoFuncaoId, setGerandoFuncaoId] = useState<string | null>(null);
+  const [arrastando, setArrastando] = useState<{ id: string; funcao: string; data: string; militarId: string } | null>(null);
 
   const ubmId = usuarioAtual?.ubmId ?? '';
   const isEscalante = temPapel(usuarioAtual, 'escalante');
@@ -44,6 +56,7 @@ export default function Escala() {
   const nomeDaFuncaoSelecionada = funcoes.find((f) => f.id === funcaoSelecionada)?.nome ?? '';
 
   const militaresDaFuncaoNaUbm = militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(funcaoSelecionada));
+  const militaresDaFuncao = (funcaoId: string) => militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(funcaoId));
 
   const estaTravada = (data: string) => {
     const docId = `${ubmId}_ordinaria_${semanaInicioDe(data)}`;
@@ -62,9 +75,46 @@ export default function Escala() {
     }
   };
 
+  const handleGerarFuncao = async (funcaoId: string) => {
+    if (militaresDaFuncao(funcaoId).length === 0) {
+      alert(`Nenhum militar ativo com essa função nesta UBM. Atribua a função no módulo Efetivo.`);
+      return;
+    }
+    setGerandoFuncaoId(funcaoId);
+    try {
+      await gerarEPersistirEscalaOrdinaria({ ubmId, funcao: funcaoId, dataInicio: inicio, dataFim: fim });
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível gerar a escala.');
+    } finally {
+      setGerandoFuncaoId(null);
+    }
+  };
+
   const escalasDoPeriodo = escalasOrdinarias.filter(
     (e) => e.ubmId === ubmId && e.funcao === funcaoSelecionada && e.data >= inicio && e.data <= fim,
   );
+
+  const escalasDaSemana = escalasOrdinarias.filter(
+    (e) => e.ubmId === ubmId && dias.includes(e.data) && funcoesDaUbm.some((f) => f.id === e.funcao),
+  );
+
+  const handleSoltar = async (funcaoId: string, dia: string, entradaDestino: (typeof escalasDaSemana)[number] | undefined) => {
+    const origem = arrastando;
+    setArrastando(null);
+    if (!origem) return;
+    if (origem.funcao !== funcaoId || origem.data === dia) return;
+    if (estaTravada(dia) || estaTravada(origem.data)) return;
+    try {
+      if (entradaDestino) {
+        await updateEscalaOrdinaria(origem.id, entradaDestino.militarId);
+        await updateEscalaOrdinaria(entradaDestino.id, origem.militarId);
+      } else {
+        await moverDataEscalaOrdinaria(origem.id, dia);
+      }
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível mover essa escala.');
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -88,12 +138,14 @@ export default function Escala() {
       {aba === 'ordinaria' && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-3 bg-white p-4 rounded-lg border border-gray-200">
-            <select value={funcaoSelecionada} onChange={(e) => setFuncaoSelecionada(e.target.value)} className="border border-gray-300 rounded-md text-sm py-2 px-3">
-              {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
-              {funcoesDaUbm.map((f) => (
-                <option key={f.id} value={f.id}>{f.nome}</option>
-              ))}
-            </select>
+            {granularidade !== 'semanal' && (
+              <select value={funcaoSelecionada} onChange={(e) => setFuncaoSelecionada(e.target.value)} className="border border-gray-300 rounded-md text-sm py-2 px-3">
+                {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+                {funcoesDaUbm.map((f) => (
+                  <option key={f.id} value={f.id}>{f.nome}</option>
+                ))}
+              </select>
+            )}
             <div className="flex gap-1">
               {(['semanal', 'mensal', 'anual'] as Granularidade[]).map((g) => (
                 <button
@@ -105,7 +157,7 @@ export default function Escala() {
                 </button>
               ))}
             </div>
-            {isEscalante && (
+            {isEscalante && granularidade !== 'semanal' && (
               <button
                 onClick={handleGerar}
                 disabled={gerando || militaresDaFuncaoNaUbm.length === 0}
@@ -120,51 +172,47 @@ export default function Escala() {
             <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
               Nenhuma função cadastrada nesta UBM ainda. Cadastre em "Funções" antes de gerar a escala.
             </p>
-          ) : militaresDaFuncaoNaUbm.length === 0 ? (
+          ) : granularidade !== 'semanal' && militaresDaFuncaoNaUbm.length === 0 ? (
             <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
               Nenhum militar ativo com a função "{nomeDaFuncaoSelecionada}" nesta UBM. Atribua a função no módulo Efetivo.
             </p>
           ) : null}
 
           {granularidade === 'semanal' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
-              {dias.map((dia) => {
-                const doDia = escalasDoPeriodo.filter((e) => e.data === dia);
-                const travada = estaTravada(dia);
-                return (
-                  <div key={dia} className="bg-white rounded-lg border border-gray-200 p-3 min-h-[140px]">
-                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
-                      {format(new Date(dia + 'T00:00:00'), "EEE dd/MM", { locale: ptBR })}
-                      {travada && <span title="Semana fechada"><Lock className="w-3 h-3 text-gray-400" /></span>}
-                    </p>
-                    <div className="space-y-2">
-                      {doDia.length === 0 && <p className="text-xs text-gray-400">Sem escala</p>}
-                      {doDia.map((e) => {
-                        const militar = militares.find((m) => m.id === e.militarId);
-                        return (
-                          <div key={e.id} className="bg-red-50 border border-red-100 rounded-md p-2 text-xs">
-                            <p className="font-medium text-red-900">{militar?.nome ?? 'Militar removido'}</p>
-                            {e.origem === 'diferenciada' && (
-                              <p className="text-[10px] uppercase text-amber-600 font-semibold">diferenciada</p>
-                            )}
-                            {isEscalante && !travada && e.origem !== 'diferenciada' && (
-                              <select
-                                className="mt-1 w-full text-xs border-gray-200 rounded"
-                                value={e.militarId}
-                                onChange={(ev) => updateEscalaOrdinaria(e.id, ev.target.value)}
-                              >
-                                {militaresDaFuncaoNaUbm.map((m) => (
-                                  <option key={m.id} value={m.id}>{m.nome}</option>
-                                ))}
-                              </select>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+            <div className="overflow-x-auto">
+              <div className="min-w-[880px] grid gap-2" style={{ gridTemplateColumns: '180px repeat(7, minmax(110px, 1fr))' }}>
+                <div />
+                {dias.map((dia) => (
+                  <div key={dia} className="text-xs font-semibold text-gray-500 uppercase text-center py-2 flex items-center justify-center gap-1">
+                    {format(new Date(dia + 'T00:00:00'), "EEE dd/MM", { locale: ptBR })}
+                    {estaTravada(dia) && <span title="Semana fechada"><Lock className="w-3 h-3 text-gray-400" /></span>}
                   </div>
-                );
-              })}
+                ))}
+
+                {funcoesDaUbm.map((f) => (
+                  <FuncaoLinha
+                    key={f.id}
+                    funcao={f}
+                    dias={dias}
+                    escalasDaSemana={escalasDaSemana}
+                    militares={militares}
+                    militaresDaFuncao={militaresDaFuncao(f.id)}
+                    isEscalante={isEscalante}
+                    estaTravada={estaTravada}
+                    arrastando={arrastando}
+                    setArrastando={setArrastando}
+                    onSoltar={handleSoltar}
+                    updateEscalaOrdinaria={updateEscalaOrdinaria}
+                    gerando={gerandoFuncaoId === f.id}
+                    onGerar={() => handleGerarFuncao(f.id)}
+                  />
+                ))}
+              </div>
+              {isEscalante && (
+                <p className="text-xs text-gray-400 mt-2">
+                  Arraste um militar pra outro dia (troca de lugar com quem já estiver lá) ou use o seletor no cartão — em telas sem mouse, use o seletor.
+                </p>
+              )}
             </div>
           ) : (
             <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
@@ -199,6 +247,107 @@ export default function Escala() {
       {aba === 'extraordinaria' && <AbaExtraordinaria ubmId={ubmId} isEscalante={isEscalante} />}
       {aba === 'diferenciada' && <AbaDiferenciada ubmId={ubmId} />}
     </div>
+  );
+}
+
+/**
+ * Uma linha do Kanban semanal (8 células — rótulo da função + 7 dias) como
+ * filhos diretos do grid do componente pai (por isso o Fragment: não pode
+ * envolver as células numa div, ou elas parariam de fazer parte do grid).
+ */
+function FuncaoLinha({
+  funcao,
+  dias,
+  escalasDaSemana,
+  militares,
+  militaresDaFuncao,
+  isEscalante,
+  estaTravada,
+  arrastando,
+  setArrastando,
+  onSoltar,
+  updateEscalaOrdinaria,
+  gerando,
+  onGerar,
+}: {
+  funcao: FuncaoUbm;
+  dias: string[];
+  escalasDaSemana: EscalaOrdinaria[];
+  militares: Militar[];
+  militaresDaFuncao: Militar[];
+  isEscalante: boolean;
+  estaTravada: (data: string) => boolean;
+  arrastando: { id: string; funcao: string; data: string; militarId: string } | null;
+  setArrastando: (v: { id: string; funcao: string; data: string; militarId: string } | null) => void;
+  onSoltar: (funcaoId: string, dia: string, entradaDestino: EscalaOrdinaria | undefined) => void;
+  updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
+  gerando: boolean;
+  onGerar: () => void;
+}) {
+  const escalasDaFuncao = escalasDaSemana.filter((e) => e.funcao === funcao.id);
+
+  return (
+    <Fragment>
+      <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 flex items-center justify-between gap-1 sticky left-0">
+        <span className="text-sm font-medium text-gray-800 truncate" title={funcao.nome}>{funcao.nome}</span>
+        {isEscalante && (
+          <button
+            onClick={onGerar}
+            disabled={gerando}
+            title="Gerar previsão pra essa função"
+            className="shrink-0 p-1 -m-1 text-gray-400 hover:text-red-700 disabled:opacity-50"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {dias.map((dia) => {
+        const entrada = escalasDaFuncao.find((e) => e.data === dia);
+        const militar = entrada ? militares.find((m) => m.id === entrada.militarId) : undefined;
+        const travada = estaTravada(dia);
+        const podeArrastar = isEscalante && !travada && !!entrada && entrada.origem !== 'diferenciada';
+        const podeSoltarAqui = isEscalante && !travada && !!arrastando && arrastando.funcao === funcao.id && arrastando.data !== dia;
+
+        return (
+          <div
+            key={funcao.id + dia}
+            onDragOver={(ev) => {
+              if (podeSoltarAqui) ev.preventDefault();
+            }}
+            onDrop={() => onSoltar(funcao.id, dia, entrada)}
+            className={`min-h-[64px] rounded-lg p-1.5 border border-dashed ${podeSoltarAqui ? 'border-red-300 bg-red-50/50' : 'border-gray-200 bg-gray-50'}`}
+          >
+            {entrada ? (
+              <div
+                draggable={podeArrastar}
+                onDragStart={() => setArrastando({ id: entrada.id, funcao: funcao.id, data: entrada.data, militarId: entrada.militarId })}
+                onDragEnd={() => setArrastando(null)}
+                className={`bg-red-50 border border-red-100 rounded-md p-2 text-xs ${podeArrastar ? 'cursor-grab active:cursor-grabbing' : ''}`}
+              >
+                <p className="font-medium text-red-900 truncate">{militar?.nome ?? 'Militar removido'}</p>
+                {entrada.origem === 'diferenciada' && (
+                  <p className="text-[10px] uppercase text-amber-600 font-semibold">diferenciada</p>
+                )}
+                {isEscalante && !travada && entrada.origem !== 'diferenciada' && (
+                  <select
+                    className="mt-1 w-full text-[11px] border-gray-200 rounded"
+                    value={entrada.militarId}
+                    onChange={(ev) => updateEscalaOrdinaria(entrada.id, ev.target.value)}
+                  >
+                    {militaresDaFuncao.map((m) => (
+                      <option key={m.id} value={m.id}>{m.nome}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            ) : (
+              <p className="text-[11px] text-gray-300 text-center pt-5">Sem escala</p>
+            )}
+          </div>
+        );
+      })}
+    </Fragment>
   );
 }
 

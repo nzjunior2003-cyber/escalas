@@ -10,16 +10,15 @@ interface HeaderProps {
 }
 
 export default function Header({ sidebarOpen, setSidebarOpen }: HeaderProps) {
-  const { usuarioAtual, ubms, logout, alertas } = useApp();
-  const ubm = ubms.find((u) => u.id === usuarioAtual?.ubmId);
+  const { usuarioAtual, logout, alertas } = useApp();
   const naoLidos = alertas.filter((a) => !a.lida).length;
 
   return (
-    <header className="flex-shrink-0 h-20 bg-red-800 text-white shadow-md border-b-2 border-amber-400 z-20 relative">
-      <div className="flex items-stretch justify-between h-full relative z-10 w-full">
+    <header className="flex-shrink-0 min-h-20 bg-red-800 text-white shadow-md border-b-2 border-amber-400 z-20 relative">
+      <div className="flex items-stretch justify-between min-h-20 relative z-10 w-full">
         <div className="flex items-center h-full flex-1">
           <div
-            className={`bg-white flex items-center justify-center h-full px-6 sm:px-8 shadow-sm relative transition-all duration-300 w-fit ${sidebarOpen ? 'md:w-64' : ''}`}
+            className={`bg-white dark:bg-slate-900 flex items-center justify-center h-full px-6 sm:px-8 shadow-sm relative transition-all duration-300 w-fit ${sidebarOpen ? 'md:w-64' : ''}`}
           >
             <button
               type="button"
@@ -37,12 +36,9 @@ export default function Header({ sidebarOpen, setSidebarOpen }: HeaderProps) {
             />
           </div>
 
-          <div className="flex flex-col justify-center ml-4">
-            <span className="text-xl font-bold tracking-wide leading-tight hidden sm:block">CBMPA - Jornada de Trabalho</span>
-            <span className="text-xl font-bold tracking-wide leading-tight sm:hidden">CBMPA</span>
-            <span className="text-xs font-semibold text-red-200 uppercase tracking-wider mt-0.5 hidden sm:block">
-              {ubm ? `${ubm.sigla} - ${ubm.nome}` : 'Gestão de Escalas de Serviço'}
-            </span>
+          <div className="flex flex-col justify-center ml-3 sm:ml-4 py-2 min-w-0">
+            <span className="text-xs sm:text-base font-bold leading-snug">Corpo de Bombeiros Militar do Pará e</span>
+            <span className="text-xs sm:text-base font-bold leading-snug">Coordenadoria Estadual de Proteção e Defesa Civil</span>
           </div>
         </div>
 

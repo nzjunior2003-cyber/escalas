@@ -143,6 +143,7 @@ interface AppContextData {
 
   gerarEPersistirEscalaOrdinaria: (params: { ubmId: string; funcao: string; dataInicio: string; dataFim: string }) => Promise<number>;
   updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
+  moverDataEscalaOrdinaria: (id: string, novaData: string) => Promise<void>;
   deleteEscalaOrdinaria: (id: string) => Promise<void>;
 
   criarEscalaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; militarIdEscolhido?: string }) => Promise<string>;
@@ -766,6 +767,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const updateEscalaOrdinaria = useCallback(async (id: string, militarId: string) => {
     const db = requireDb();
     await updateDoc(doc(db, 'escalas_ordinarias', id), { militarId, origem: 'manual' });
+  }, []);
+
+  /** Kanban por função: mover um cartão pra um dia sem escala ainda (dia com escala existente usa updateEscalaOrdinaria duas vezes — troca de militarId — pra não duplicar/apagar registros). */
+  const moverDataEscalaOrdinaria = useCallback(async (id: string, novaData: string) => {
+    const db = requireDb();
+    await updateDoc(doc(db, 'escalas_ordinarias', id), { data: novaData, origem: 'manual' });
   }, []);
 
   const deleteEscalaOrdinaria = useCallback(async (id: string) => {
@@ -1481,6 +1488,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteFuncao,
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
+      moverDataEscalaOrdinaria,
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
@@ -1549,6 +1557,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteFuncao,
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
+      moverDataEscalaOrdinaria,
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
