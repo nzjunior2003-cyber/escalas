@@ -2,8 +2,8 @@
  * Geração real de PDF (download direto, sem depender do diálogo de
  * impressão do navegador) para o relatório semanal de escala. Paisagem, no
  * padrão visual institucional único: brasão CBMPA+CEDEC à esquerda no
- * cabeçalho (com o nome do CRB e da UBM por extenso), linha dos dias em
- * amarelo ouro, corpo em zebra branco/cinza claro, assinatura do escalante
+ * cabeçalho (com o nome do CRB e da UBM por extenso), linha de função e
+ * dias em amarelo, corpo em zebra branco/cinza claro, assinatura do escalante
  * e rodapé com o brasão e o endereço da UBM — igual pra ordinária e
  * extraordinária.
  */
@@ -15,8 +15,8 @@ import { carregarImagemPublicaComoDataUrl } from './imagem';
 
 /** Proporção largura/altura do brasão institucional duplo (316×159px). */
 const PROPORCAO_BRASAO_DUPLO = 316 / 159;
-/** "Amarelo ouro" institucional usado na linha dos dias da semana. */
-const COR_OURO: [number, number, number] = [212, 175, 55];
+/** Amarelo usado na linha de função e dias da semana. */
+const COR_AMARELO: [number, number, number] = [255, 204, 0];
 
 export interface FuncaoEscala {
   id: string;
@@ -132,7 +132,7 @@ export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void>
     head: [cabecalho],
     body: corpo,
     margin: { left: margemLateral, right: margemLateral },
-    headStyles: { fillColor: COR_OURO, textColor: [40, 30, 0] as [number, number, number], fontStyle: 'bold' as const, halign: 'center' as const, fontSize: 9 },
+    headStyles: { fillColor: COR_AMARELO, textColor: [40, 30, 0] as [number, number, number], fontStyle: 'bold' as const, halign: 'center' as const, fontSize: 9 },
     styles: { fontSize: 9, cellPadding: 6, valign: 'middle' as const },
     columnStyles: { 0: { fontStyle: 'bold' as const, cellWidth: 130 } },
     alternateRowStyles: { fillColor: [237, 237, 237] as [number, number, number] },
@@ -150,7 +150,7 @@ export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void>
   const gapTituloTabela = 12;
   const gapTabelaData = 22;
   const alturaData = 14;
-  const gapDataAssinatura = 46;
+  const gapDataAssinatura = 90;
   const alturaAssinatura = 28;
   const alturaBloco = alturaTitulo + gapTituloTabela + alturaTabela + gapTabelaData + alturaData + gapDataAssinatura + alturaAssinatura;
 
@@ -204,7 +204,7 @@ export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void>
   let xRodapeTexto = margemLateral;
 
   if (dados.ubmLogoDataUrl) {
-    const tamanhoBrasaoUbm = 34;
+    const tamanhoBrasaoUbm = 46;
     doc.addImage(dados.ubmLogoDataUrl, 'PNG', margemLateral, yRodape - tamanhoBrasaoUbm / 2, tamanhoBrasaoUbm, tamanhoBrasaoUbm);
     xRodapeTexto = margemLateral + tamanhoBrasaoUbm + 8;
   }
