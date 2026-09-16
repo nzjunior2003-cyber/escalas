@@ -448,7 +448,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             enviarEmail({
               to: destinatario.email,
               subject: `Nova solicitação de acesso — ${nome}`,
-              html: `<h2>Nova Solicitação de Acesso</h2><p><b>${nome}</b>${cargo ? ` (${cargo})` : ''} solicitou acesso ao Sistema de Jornada de Trabalho com o e-mail <b>${email}</b>.</p><p>Acesse o módulo <b>Usuários</b> para revisar e ativar o acesso.</p>`,
+              html: `<h2>Nova Solicitação de Acesso</h2><p><b>${nome}</b>${cargo ? ` (${cargo})` : ''} solicitou acesso ao GESOP com o e-mail <b>${email}</b>.</p><p>Acesse o módulo <b>Usuários</b> para revisar e ativar o acesso.</p>`,
             }).catch((erroEnvio) => console.error('Erro ao notificar aprovador:', erroEnvio)),
           ),
         );
@@ -481,7 +481,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             enviarEmail({
               to: m.email,
               subject: `Militar não encontrado na planilha — ${dados.nome}`,
-              html: `<h2>Solicitação de acesso sem correspondência na planilha</h2><p><b>${dados.nome}</b>${detalhes ? ` (${detalhes})` : ''} pediu acesso ao Sistema de Jornada de Trabalho com o e-mail <b>${dados.email}</b>, mas não foi encontrado na planilha de efetivo.</p><p>Inclua a pessoa na planilha e/ou aprove o acesso manualmente no módulo <b>Usuários</b>.</p>`,
+              html: `<h2>Solicitação de acesso sem correspondência na planilha</h2><p><b>${dados.nome}</b>${detalhes ? ` (${detalhes})` : ''} pediu acesso ao GESOP com o e-mail <b>${dados.email}</b>, mas não foi encontrado na planilha de efetivo.</p><p>Inclua a pessoa na planilha e/ou aprove o acesso manualmente no módulo <b>Usuários</b>.</p>`,
             }).catch((erroEnvio) => console.error('Erro ao notificar master:', erroEnvio)),
           ),
         );
@@ -605,7 +605,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         try {
           await enviarEmail({
             to: email,
-            subject: 'Cadastro recebido — Sistema de Jornada de Trabalho',
+            subject: 'Cadastro recebido — GESOP',
             html: `<h2>Cadastro recebido</h2><p>Olá, ${nomeGuerra}. Seu cadastro (matrícula ${matricula}) foi recebido e está aguardando aprovação do Comandante/Escalante da sua UBM. Você será avisado quando puder acessar o sistema.</p>`,
           });
         } catch (erroEnvio) {

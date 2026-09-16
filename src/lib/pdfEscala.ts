@@ -230,7 +230,7 @@ export async function gerarPdfEscala(dados: DadosRelatorioEscala): Promise<void>
   doc.setFontSize(7.5);
   doc.setTextColor(150);
   doc.text(
-    'Documento gerado pelo Sistema de Gerenciamento de Jornada de Trabalho — CBMPA.',
+    'Documento gerado pelo GESOP — Gerenciamento de Escalas e Serviços Operacionais — CBMPA.',
     larguraPagina - margemLateral,
     alturaPagina - 18,
     { align: 'right' },

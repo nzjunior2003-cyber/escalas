@@ -20,9 +20,9 @@ export default defineConfig(() => {
           globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         },
         manifest: {
-          name: 'Jornada de Trabalho — CBMPA',
-          short_name: 'Jornada CBMPA',
-          description: 'Sistema de Gerenciamento de Jornada de Trabalho do Corpo de Bombeiros Militar do Pará',
+          name: 'GESOP — CBMPA',
+          short_name: 'GESOP',
+          description: 'GESOP — Gerenciamento de Escalas e Serviços Operacionais do Corpo de Bombeiros Militar do Pará',
           lang: 'pt-BR',
           start_url: '/',
           scope: '/',

@@ -28,7 +28,8 @@ function CabecalhoBrasao({ logoSrc, subtitulo }: { logoSrc: string; subtitulo: s
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 flex flex-col sm:flex-row items-center sm:items-start gap-4 text-center sm:text-left">
       <img src={logoSrc} alt="Brasão" className="w-16 h-16 sm:w-20 sm:h-20 object-contain flex-shrink-0" />
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Plataforma de Gerenciamento de Serviços Operacionais</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">GESOP</h1>
+        <p className="text-xs sm:text-sm text-gray-500">Gerenciamento de Escalas e Serviços Operacionais</p>
         <p className="mt-1 text-sm sm:text-base font-medium text-gray-600">{subtitulo}</p>
       </div>
     </div>

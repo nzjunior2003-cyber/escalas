@@ -22,8 +22,9 @@ export default function PublicHome() {
       <main className="flex-1 px-4 py-8">
         <div className="max-w-md mx-auto bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 shadow-sm p-6 sm:p-8 space-y-3">
           <h1 className="text-center">
-            <span className="inline-block bg-amber-400 text-red-900 font-bold px-4 py-1.5 rounded-md text-lg sm:text-xl leading-snug">
-              Plataforma de Gerenciamento de Serviços Operacionais
+            <span className="inline-flex flex-col items-center bg-amber-400 text-red-900 font-bold px-4 py-2 rounded-md leading-snug">
+              <span className="text-xl sm:text-2xl tracking-wide">GESOP</span>
+              <span className="text-xs sm:text-sm font-semibold">Gerenciamento de Escalas e Serviços Operacionais</span>
             </span>
           </h1>
           <LoginModal embedded onClose={() => {}} />
