@@ -4,7 +4,7 @@ import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarDays, Plus, Sparkles, Lock, Megaphone, HandHeart, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, ordenarCandidatosExtraordinario, semanaInicioDe } from '../../lib/escala';
+import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, ordenarCandidatosExtraordinario, previsaoLiberada, semanaInicioDe } from '../../lib/escala';
 import { STATUS_VAGA_VOLUNTARIA_LABELS, temPapel } from '../../types';
 import type { EscalaOrdinaria, FuncaoUbm, Militar } from '../../types';
 
@@ -30,6 +30,7 @@ function intervaloPorGranularidade(granularidade: Granularidade, base: Date): { 
 export default function Escala() {
   const {
     usuarioAtual,
+    ubms,
     militares,
     funcoes,
     escalasOrdinarias,
@@ -63,16 +64,27 @@ export default function Escala() {
   const militaresDaFuncaoNaUbm = militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(funcaoSelecionada));
   const militaresDaFuncao = (funcaoId: string) => militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(funcaoId));
 
+  const ubmAtual = ubms.find((u) => u.id === ubmId);
+  const escalasOrdinariasDaUbm = escalasOrdinarias.filter((e) => e.ubmId === ubmId);
+  const podeGerarPrevisao = previsaoLiberada(ubmAtual, funcoesDaUbm, escalasOrdinariasDaUbm);
+
   const estaTravada = (data: string) => {
     const docId = `${ubmId}_ordinaria_${semanaInicioDe(data)}`;
     return fechamentosEscala.find((f) => f.id === docId)?.travada ?? false;
   };
 
+  // A geração sempre roda pra UBM inteira (todas as funções ativas juntas)
+  // — nunca uma função isolada, senão o sistema não teria como saber que um
+  // militar com múltiplas funções já foi escalado em outra no mesmo dia.
   const handleGerar = async () => {
+    if (!podeGerarPrevisao) {
+      alert('A geração automática só libera depois que o efetivo estiver completo e a primeira semana (todas as funções, 7 dias) estiver preenchida manualmente.');
+      return;
+    }
     setGerando(true);
     try {
-      const total = await gerarEPersistirEscalaOrdinaria({ ubmId, funcao: funcaoSelecionada, dataInicio: inicio, dataFim: fim });
-      alert(`Previsão gerada: ${total} dias de escala para ${nomeDaFuncaoSelecionada}.`);
+      const total = await gerarEPersistirEscalaOrdinaria({ ubmId, dataInicio: inicio, dataFim: fim });
+      alert(`Previsão gerada: ${total} dias de escala no período, considerando todas as funções da UBM.`);
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível gerar a escala.');
     } finally {
@@ -81,13 +93,20 @@ export default function Escala() {
   };
 
   const handleGerarFuncao = async (funcaoId: string) => {
+    if (!podeGerarPrevisao) {
+      alert('A geração automática só libera depois que o efetivo estiver completo e a primeira semana (todas as funções, 7 dias) estiver preenchida manualmente.');
+      return;
+    }
     if (militaresDaFuncao(funcaoId).length === 0) {
       alert(`Nenhum militar ativo com essa função nesta UBM. Atribua a função no módulo Efetivo.`);
       return;
     }
     setGerandoFuncaoId(funcaoId);
     try {
-      await gerarEPersistirEscalaOrdinaria({ ubmId, funcao: funcaoId, dataInicio: inicio, dataFim: fim });
+      // Gera pra UBM inteira mesmo clicando no ícone de uma função só — as
+      // outras funções já preenchidas simplesmente não mudam (ver nota em
+      // gerarEscalaOrdinariaUbm), então é seguro disparar daqui.
+      await gerarEPersistirEscalaOrdinaria({ ubmId, dataInicio: inicio, dataFim: fim });
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível gerar a escala.');
     } finally {
@@ -164,13 +183,22 @@ export default function Escala() {
             {isEscalante && granularidade !== 'semanal' && (
               <button
                 onClick={handleGerar}
-                disabled={gerando || militaresDaFuncaoNaUbm.length === 0}
+                disabled={gerando || militaresDaFuncaoNaUbm.length === 0 || !podeGerarPrevisao}
+                title={podeGerarPrevisao ? undefined : 'Confirme o efetivo completo e preencha a primeira semana manualmente antes de gerar previsões.'}
                 className="ml-auto inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50"
               >
                 <Sparkles className="-ml-1 mr-2 h-4 w-4" /> {gerando ? 'Gerando...' : 'Gerar previsão'}
               </button>
             )}
           </div>
+
+          {isEscalante && !podeGerarPrevisao && (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
+              A geração automática de previsões futuras ainda está bloqueada: confirme que terminou de cadastrar o
+              efetivo (em "Efetivo") e preencha manualmente a primeira semana — todas as funções, nos 7 dias — antes
+              de liberar.
+            </p>
+          )}
 
           {funcoesDaUbm.length === 0 ? (
             <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">

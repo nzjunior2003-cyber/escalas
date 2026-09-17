@@ -213,7 +213,7 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
 
     setAguardando(true);
     try {
-      await primeiroAcessoPorMatricula({
+      const { autoVinculado } = await primeiroAcessoPorMatricula({
         matricula: militarValidado.matricula,
         nomeCompleto: militarValidado.nome,
         cargo: militarValidado.posto,
@@ -222,7 +222,11 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
         senha: cadastroSenha,
         ubmId: cadastroUbmId,
       });
-      alert('Cadastro recebido! Enviamos um e-mail de confirmação. Aguarde a aprovação do Comandante/Escalante da sua UBM.');
+      alert(
+        autoVinculado
+          ? 'Cadastro concluído! Sua UBM já tinha você no efetivo, então seu acesso já está liberado — pode entrar com o e-mail e a senha que você cadastrou.'
+          : 'Cadastro recebido! Enviamos um e-mail de confirmação. Aguarde a aprovação do Comandante/Escalante da sua UBM.',
+      );
       setIdentificador('');
       setSenha('');
       trocarView('login');

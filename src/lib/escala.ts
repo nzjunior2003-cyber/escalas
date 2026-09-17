@@ -53,6 +53,7 @@ import {
   type Afastamento,
   type EscalaExtraordinaria,
   type EscalaOrdinaria,
+  type FuncaoUbm,
   type Militar,
 } from '../types';
 
@@ -65,6 +66,31 @@ export function formatarDataISO(data: Date): string {
 /** Segunda-feira (yyyy-MM-dd) da semana à qual `data` (yyyy-MM-dd) pertence — usado pra achar o fechamento da semana. */
 export function semanaInicioDe(data: string): string {
   return formatarDataISO(startOfWeek(parseISO(data), { weekStartsOn: 1 }));
+}
+
+/**
+ * A geração automática de previsões futuras só libera depois que o
+ * escalante confirma ter terminado de cadastrar o efetivo (`ubm.efetivoCompleto`)
+ * E a primeira semana com lançamentos (a mais antiga que já tem qualquer
+ * escala ordinária na UBM) está com TODAS as funções ativas preenchidas nos
+ * 7 dias — ou seja, montada manualmente antes do sistema assumir.
+ */
+export function previsaoLiberada(
+  ubm: { efetivoCompleto?: boolean } | undefined,
+  funcoesAtivas: FuncaoUbm[],
+  escalasOrdinariasDaUbm: EscalaOrdinaria[],
+): boolean {
+  if (!ubm?.efetivoCompleto) return false;
+  if (funcoesAtivas.length === 0) return false;
+  if (escalasOrdinariasDaUbm.length === 0) return false;
+
+  const dataMaisAntiga = escalasOrdinariasDaUbm.reduce((min, e) => (e.data < min ? e.data : min), escalasOrdinariasDaUbm[0].data);
+  const semanaBase = semanaInicioDe(dataMaisAntiga);
+  const diasDaSemana = Array.from({ length: 7 }, (_, i) => formatarDataISO(addDays(parseISO(semanaBase), i)));
+
+  return funcoesAtivas.every((f) =>
+    diasDaSemana.every((dia) => escalasOrdinariasDaUbm.some((e) => e.funcao === f.id && e.data === dia)),
+  );
 }
 
 export function militaresDaFuncao(militares: Militar[], ubmId: string, funcao: string): Militar[] {
@@ -96,43 +122,68 @@ export function diasIsentosAteData(militarId: string, ateData: string, afastamen
 }
 
 /**
- * Gera a previsão de escala ordinária corrida para uma função: em cada dia
- * do período, escala quem tem menos serviços acumulados naquela função (ver
- * nota do módulo) entre os disponíveis — pulando quem estiver afastado —,
- * desempatando por quem serviu há mais tempo (ou nunca serviu). Precisa do
- * histórico já persistido (`escalasOrdinariasExistentes`) para contar certo;
- * sem ele, cada geração recomeçaria do zero e favoreceria sempre os
- * primeiros da lista.
+ * Gera a previsão de escala ordinária corrida para TODAS as funções ativas
+ * de uma UBM de uma vez (nunca uma função isolada): um militar vinculado a
+ * mais de uma função só pode estar em UMA por dia, e a prioridade de quem
+ * tem múltiplas funções vai sempre para a função com MENOS militares
+ * vinculados — é ela que sofre mais com a ausência dele, então equaliza-la
+ * primeiro é o que mantém a folga de todo mundo parecida. Na prática: as
+ * funções são processadas em ordem crescente de tamanho a cada dia, e quem
+ * já foi escalado em uma função naquele dia sai do páreo das demais.
+ *
+ * Dentro de cada função, o critério continua o mesmo: quem tem MENOS
+ * serviços acumulados NAQUELA função (ver nota do módulo) entre os
+ * disponíveis — pulando quem estiver afastado —, desempatando por quem
+ * serviu há mais tempo (ou nunca serviu). Precisa do histórico já
+ * persistido (`escalasOrdinariasExistentes`, de QUALQUER função da UBM,
+ * pra respeitar exclusividade por dia mesmo com lançamentos manuais
+ * anteriores) — sem ele, cada geração recomeçaria do zero e favoreceria
+ * sempre os primeiros da lista.
  */
-export function gerarEscalaOrdinaria(params: {
+export function gerarEscalaOrdinariaUbm(params: {
   ubmId: string;
-  funcao: string;
+  funcoes: FuncaoUbm[];
   militares: Militar[];
   afastamentos: Afastamento[];
   escalasOrdinariasExistentes: EscalaOrdinaria[];
   dataInicio: string;
   dataFim: string;
 }): Omit<EscalaOrdinaria, 'id' | 'criado_em'>[] {
-  const { ubmId, funcao, afastamentos, escalasOrdinariasExistentes, dataInicio, dataFim } = params;
-  const elegiveis = militaresDaFuncao(params.militares, ubmId, funcao);
-  if (elegiveis.length === 0) return [];
+  const { ubmId, afastamentos, escalasOrdinariasExistentes, dataInicio, dataFim } = params;
+  const funcoesAtivas = params.funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
+  if (funcoesAtivas.length === 0) return [];
 
-  // Crédito inicial: dias de férias/licença/dispensa médica/outro (nunca
-  // missão externa) contam como já "servidos" só pra essa comparação —
-  // sem isso, o próprio algoritmo de equalização trataria a volta de
-  // qualquer afastamento como uma fila de recuperação a cumprir.
-  const contagem = new Map<string, number>(
-    elegiveis.map((m) => [m.id, diasIsentosAteData(m.id, dataFim, afastamentos)]),
+  const elegiveisPorFuncao = new Map<string, Militar[]>(
+    funcoesAtivas.map((f) => [f.id, militaresDaFuncao(params.militares, ubmId, f.id)]),
   );
+  // Funções mais escassas primeiro — quem acumula funções é priorizado nelas.
+  const funcoesOrdenadas = [...funcoesAtivas].sort(
+    (a, b) => (elegiveisPorFuncao.get(a.id)?.length ?? 0) - (elegiveisPorFuncao.get(b.id)?.length ?? 0),
+  );
+
+  // Chave composta militarId|funcaoId: cada função mantém sua própria
+  // contagem de equidade, mesmo pra quem acumula mais de uma.
+  const chave = (militarId: string, funcaoId: string) => `${militarId}|${funcaoId}`;
+  const contagem = new Map<string, number>();
   const ultimoServico = new Map<string, string>();
-  const diasJaEscalados = new Set<string>();
+  funcoesAtivas.forEach((f) => {
+    (elegiveisPorFuncao.get(f.id) ?? []).forEach((m) => {
+      contagem.set(chave(m.id, f.id), diasIsentosAteData(m.id, dataFim, afastamentos));
+    });
+  });
+
+  const diasJaEscaladosPorFuncao = new Map<string, Set<string>>(funcoesAtivas.map((f) => [f.id, new Set<string>()]));
+  const militarOcupadoNoDia = new Map<string, Set<string>>();
   for (const e of escalasOrdinariasExistentes) {
-    if (e.ubmId !== ubmId || e.funcao !== funcao) continue;
-    diasJaEscalados.add(e.data);
-    if (!contagem.has(e.militarId)) continue;
-    contagem.set(e.militarId, (contagem.get(e.militarId) ?? 0) + 1);
-    const atual = ultimoServico.get(e.militarId);
-    if (!atual || e.data > atual) ultimoServico.set(e.militarId, e.data);
+    if (e.ubmId !== ubmId) continue;
+    diasJaEscaladosPorFuncao.get(e.funcao)?.add(e.data);
+    if (!militarOcupadoNoDia.has(e.data)) militarOcupadoNoDia.set(e.data, new Set());
+    militarOcupadoNoDia.get(e.data)!.add(e.militarId);
+    const k = chave(e.militarId, e.funcao);
+    if (!contagem.has(k)) continue;
+    contagem.set(k, (contagem.get(k) ?? 0) + 1);
+    const atual = ultimoServico.get(k);
+    if (!atual || e.data > atual) ultimoServico.set(k, e.data);
   }
 
   const resultado: Omit<EscalaOrdinaria, 'id' | 'criado_em'>[] = [];
@@ -141,34 +192,33 @@ export function gerarEscalaOrdinaria(params: {
 
   while (differenceInCalendarDays(fim, dataAtual) >= 0) {
     const dataStr = formatarDataISO(dataAtual);
+    const ocupadosHoje = new Set(militarOcupadoNoDia.get(dataStr) ?? []);
 
-    if (diasJaEscalados.has(dataStr)) {
-      // Esse dia já tem alguém escalado (de uma geração anterior) — não
-      // duplica; quem quiser mudar, edita a escala já gerada.
-      dataAtual = addDays(dataAtual, 1);
-      continue;
+    for (const funcao of funcoesOrdenadas) {
+      const jaEscalados = diasJaEscaladosPorFuncao.get(funcao.id)!;
+      if (jaEscalados.has(dataStr)) continue;
+
+      const elegiveis = elegiveisPorFuncao.get(funcao.id) ?? [];
+      const disponiveis = elegiveis.filter((m) => !estaAfastado(m.id, dataStr, afastamentos) && !ocupadosHoje.has(m.id));
+      if (disponiveis.length === 0) continue;
+
+      disponiveis.sort((a, b) => {
+        const ka = chave(a.id, funcao.id);
+        const kb = chave(b.id, funcao.id);
+        const diferenca = (contagem.get(ka) ?? 0) - (contagem.get(kb) ?? 0);
+        if (diferenca !== 0) return diferenca;
+        return (ultimoServico.get(ka) ?? '').localeCompare(ultimoServico.get(kb) ?? '');
+      });
+      const escolhido = disponiveis[0];
+      const k = chave(escolhido.id, funcao.id);
+
+      resultado.push({ ubmId, funcao: funcao.id, data: dataStr, militarId: escolhido.id, origem: 'gerada' });
+      contagem.set(k, (contagem.get(k) ?? 0) + 1);
+      ultimoServico.set(k, dataStr);
+      ocupadosHoje.add(escolhido.id);
+      jaEscalados.add(dataStr);
     }
 
-    const disponiveis = elegiveis.filter((m) => !estaAfastado(m.id, dataStr, afastamentos));
-
-    if (disponiveis.length === 0) {
-      // Ninguém da função disponível nesse dia (todos afastados) — não dá
-      // pra escalar, segue pro próximo dia sem deixar isso desequilibrar a
-      // contagem de ninguém.
-      dataAtual = addDays(dataAtual, 1);
-      continue;
-    }
-
-    disponiveis.sort((a, b) => {
-      const diferenca = (contagem.get(a.id) ?? 0) - (contagem.get(b.id) ?? 0);
-      if (diferenca !== 0) return diferenca;
-      return (ultimoServico.get(a.id) ?? '').localeCompare(ultimoServico.get(b.id) ?? '');
-    });
-    const escolhido = disponiveis[0];
-
-    resultado.push({ ubmId, funcao, data: dataStr, militarId: escolhido.id, origem: 'gerada' });
-    contagem.set(escolhido.id, (contagem.get(escolhido.id) ?? 0) + 1);
-    ultimoServico.set(escolhido.id, dataStr);
     dataAtual = addDays(dataAtual, 1);
   }
 

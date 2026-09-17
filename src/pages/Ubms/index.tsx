@@ -6,14 +6,16 @@ import { redimensionarImagemParaDataUrl } from '../../lib/imagem';
 import { temPapel, type Ubm } from '../../types';
 
 /**
- * Cadastro de UBMs — criação/exclusão exclusiva do master. O Comandante da
- * própria UBM também pode editar os dados institucionais dela (brasão,
- * endereço, contato), mas não a sigla/nome nem outras unidades.
+ * Cadastro de UBMs — criação/exclusão exclusiva do master. O Comandante e o
+ * Escalante da própria UBM também podem editar os dados institucionais dela
+ * (brasão, endereço, contato), mas não a sigla/nome nem outras unidades.
  */
 export default function Ubms() {
   const { usuarioAtual, ubms, usuarios, addUbm, updateUbm } = useApp();
   const isMaster = temPapel(usuarioAtual, 'master');
   const isComandante = temPapel(usuarioAtual, 'comandante');
+  const isEscalante = temPapel(usuarioAtual, 'escalante');
+  const podeEditarPropria = isComandante || isEscalante;
 
   const [isNovoOpen, setIsNovoOpen] = useState(false);
   const [editando, setEditando] = useState<Ubm | null>(null);
@@ -32,11 +34,11 @@ export default function Ubms() {
   const inputNovoRef = useRef<HTMLInputElement>(null);
   const inputEditarRef = useRef<HTMLInputElement>(null);
 
-  if (!isMaster && !isComandante) {
+  if (!isMaster && !podeEditarPropria) {
     return <div className="p-8 text-center text-gray-500">Você não tem permissão para acessar este módulo.</div>;
   }
 
-  // Comandante só enxerga/edita a própria UBM; master vê e gerencia todas.
+  // Comandante/Escalante só enxergam/editam a própria UBM; master vê e gerencia todas.
   const ubmsVisiveis = isMaster ? ubms : ubms.filter((u) => u.id === usuarioAtual?.ubmId);
 
   const contarUsuarios = (ubmId: string) => usuarios.filter((u) => u.ubmId === ubmId).length;

@@ -43,7 +43,7 @@ import { enviarEmail } from '../lib/emailService';
 import {
   LIMITE_EXTRAORDINARIAS_POR_MES,
   extraordinariasNoMes,
-  gerarEscalaOrdinaria,
+  gerarEscalaOrdinariaUbm,
   ordenarCandidatosExtraordinario,
   sugerirMilitarExtraordinario,
   temFolga24hAntes,
@@ -126,7 +126,7 @@ interface AppContextData {
     email: string;
     senha: string;
     ubmId: string;
-  }) => Promise<void>;
+  }) => Promise<{ autoVinculado: boolean }>;
 
   addUbm: (dados: Omit<Ubm, 'id'>) => Promise<string>;
   updateUbm: (id: string, dados: Partial<Ubm>) => Promise<void>;
@@ -152,7 +152,7 @@ interface AppContextData {
   deleteFuncao: (id: string) => Promise<void>;
   moverOrdemFuncao: (ubmId: string, funcaoId: string, direcao: 'cima' | 'baixo') => Promise<void>;
 
-  gerarEPersistirEscalaOrdinaria: (params: { ubmId: string; funcao: string; dataInicio: string; dataFim: string }) => Promise<number>;
+  gerarEPersistirEscalaOrdinaria: (params: { ubmId: string; dataInicio: string; dataFim: string }) => Promise<number>;
   updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
   moverDataEscalaOrdinaria: (id: string, novaData: string) => Promise<void>;
   adicionarEscalaOrdinaria: (dados: { ubmId: string; funcao: string; data: string; militarId: string }) => Promise<void>;
@@ -552,10 +552,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   /**
    * Primeiro acesso por matrícula: a matrícula já foi validada contra a
    * planilha ao vivo (ver `validarMatriculaEfetivo`) antes de chegar aqui.
-   * Cria a conta e o perfil (sempre inativo, papel 'militar' — igual ao
-   * autocadastro por UBM) e registra `matriculas/{matricula}` para permitir
-   * login por matrícula depois. Nunca envia a senha por e-mail: a pessoa
-   * acabou de digitá-la e confirmá-la duas vezes, só confirma o cadastro.
+   * Cria a conta e o perfil, sempre com papel 'militar', e registra
+   * `matriculas/{matricula}` para permitir login por matrícula depois.
+   * Nunca envia a senha por e-mail: a pessoa acabou de digitá-la e
+   * confirmá-la duas vezes, só confirma o cadastro.
+   *
+   * Auto-vínculo: se o escalante já cadastrou essa pessoa no Efetivo da
+   * mesma UBM (mesma matrícula normalizada), a conta já nasce ATIVA e
+   * vinculada a esse `Militar` — a existência do registro é a própria
+   * verificação, sem precisar de aprovação manual. Senão, nasce inativa e
+   * segue o fluxo de sempre (notifica o escalante/comandante pra aprovar E
+   * incluir no efetivo). Retorna se ficou auto-vinculada, pra ajustar a
+   * mensagem mostrada.
    */
   const primeiroAcessoPorMatricula = useCallback(
     async ({
@@ -574,10 +582,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       email: string;
       senha: string;
       ubmId: string;
-    }) => {
+    }): Promise<{ autoVinculado: boolean }> => {
       try {
         const auth = requireFirebaseAuth();
         const db = requireDb();
+        const matriculaNormalizada = normalizarMatricula(matricula);
         const credencial = await createUserWithEmailAndPassword(auth, email, senha);
 
         await setDoc(
@@ -585,7 +594,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           semIndefinidosParaCriar({
             nome: nomeCompleto,
             nomeGuerra,
-            matricula,
+            matricula: matriculaNormalizada,
             cargo,
             email,
             ubmId,
@@ -596,24 +605,51 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         );
 
         try {
-          await setDoc(doc(db, 'matriculas', normalizarMatricula(matricula)), { email });
+          await setDoc(doc(db, 'matriculas', matriculaNormalizada), { email });
         } catch (erroMatricula) {
           // Não impede o cadastro — sem isso, a pessoa ainda consegue entrar pelo e-mail.
           console.error('Erro ao registrar matrícula para login:', erroMatricula);
         }
 
+        let autoVinculado = false;
+        try {
+          const militarSnap = await getDocs(
+            query(
+              collection(db, 'militares'),
+              where('ubmId', '==', ubmId),
+              where('matricula', '==', matriculaNormalizada),
+            ),
+          );
+          if (!militarSnap.empty) {
+            await updateDoc(doc(db, 'usuarios', credencial.user.uid), {
+              ativo: true,
+              militarId: militarSnap.docs[0].id,
+            });
+            autoVinculado = true;
+          }
+        } catch (erroVinculo) {
+          // Sem vínculo automático, segue pro fluxo normal de aprovação —
+          // nunca deixa a pessoa sem conseguir se cadastrar por causa disso.
+          console.error('Erro ao checar vínculo automático com o Efetivo:', erroVinculo);
+        }
+
         try {
           await enviarEmail({
             to: email,
-            subject: 'Cadastro recebido — GESOP',
-            html: `<h2>Cadastro recebido</h2><p>Olá, ${nomeGuerra}. Seu cadastro (matrícula ${matricula}) foi recebido e está aguardando aprovação do Comandante/Escalante da sua UBM. Você será avisado quando puder acessar o sistema.</p>`,
+            subject: autoVinculado ? 'Acesso liberado — GESOP' : 'Cadastro recebido — GESOP',
+            html: autoVinculado
+              ? `<h2>Acesso liberado</h2><p>Olá, ${nomeGuerra}. Seu cadastro (matrícula ${matricula}) já está vinculado ao efetivo da sua UBM — pode entrar no sistema normalmente com o e-mail e a senha que você cadastrou.</p>`
+              : `<h2>Cadastro recebido</h2><p>Olá, ${nomeGuerra}. Seu cadastro (matrícula ${matricula}) foi recebido e está aguardando aprovação do Comandante/Escalante da sua UBM. Você será avisado quando puder acessar o sistema.</p>`,
           });
         } catch (erroEnvio) {
           console.error('Erro ao enviar e-mail de confirmação de cadastro:', erroEnvio);
         }
 
-        await notificarAprovadoresDaUbm(ubmId, nomeCompleto, email, cargo);
+        if (!autoVinculado) {
+          await notificarAprovadoresDaUbm(ubmId, nomeCompleto, email, cargo);
+        }
         await signOut(auth);
+        return { autoVinculado };
       } catch (erro) {
         throw new Error(mensagemErroAuth(erro));
       }
@@ -836,11 +872,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // --- Escala ordinária ------------------------------------------------
+  // Gera sempre pra UBM inteira (todas as funções ativas de uma vez), nunca
+  // uma função isolada — é o que garante que ninguém seja escalado em duas
+  // funções no mesmo dia e que quem acumula funções seja priorizado na mais
+  // escassa (ver nota em `gerarEscalaOrdinariaUbm`).
   const gerarEPersistirEscalaOrdinaria = useCallback(
-    async (params: { ubmId: string; funcao: string; dataInicio: string; dataFim: string }) => {
+    async (params: { ubmId: string; dataInicio: string; dataFim: string }) => {
       const db = requireDb();
-      const geradas = gerarEscalaOrdinaria({
+      const geradas = gerarEscalaOrdinariaUbm({
         ...params,
+        funcoes,
         militares,
         afastamentos,
         escalasOrdinariasExistentes: escalasOrdinarias,
@@ -858,7 +899,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
       return geradas.length;
     },
-    [militares, afastamentos, escalasOrdinarias],
+    [funcoes, militares, afastamentos, escalasOrdinarias],
   );
 
   const updateEscalaOrdinaria = useCallback(async (id: string, militarId: string) => {

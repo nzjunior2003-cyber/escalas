@@ -76,6 +76,16 @@ export interface Ubm {
   cidade?: string;
   email?: string;
   telefone?: string;
+  /**
+   * Confirmado manualmente pelo escalante/comandante quando termina de
+   * cadastrar todo o efetivo da UBM em `Militar` — enquanto for `false`
+   * (ou ausente), a geração automática de previsões futuras de escala
+   * ordinária fica bloqueada (ver `previsaoLiberada` em `lib/escala.ts`):
+   * a ideia é a primeira semana real ser sempre montada manualmente antes
+   * do sistema começar a prever sozinho. Ação de mão única — não há botão
+   * pra desmarcar depois de confirmado.
+   */
+  efetivoCompleto?: boolean;
 }
 
 // ---------------------------------------------------------------------------

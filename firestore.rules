@@ -51,12 +51,6 @@ service cloud.firestore {
       return master() || gestaoDaUbm(ubmId);
     }
 
-    // Comandante ATIVO da própria UBM (não Escalante — edição de dados
-    // institucionais da UBM fica restrita ao Comandante e ao master).
-    function comandanteDaUbm(ubmId) {
-      return temPapel('comandante') && perfilDoc().ubmId == ubmId;
-    }
-
     match /usuarios/{usuarioId} {
       allow read: if autenticado();
 
@@ -95,6 +89,22 @@ service cloud.firestore {
         && request.resource.data.papeis == resource.data.papeis
         && request.resource.data.ativo == resource.data.ativo
         && !('senha' in request.resource.data);
+
+      // Primeiro acesso auto-vinculado: se já existe um `Militar` com a
+      // MESMA matrícula dentro da MESMA UBM (o escalante já cadastrou essa
+      // pessoa no Efetivo antes dela pedir acesso), a própria conta recém-
+      // criada pode se auto-ativar e se vincular a esse Militar — a
+      // existência do registro já é a verificação, sem depender de
+      // aprovação manual (ver `primeiroAcessoPorMatricula`).
+      allow update: if autenticado()
+        && request.auth.uid == usuarioId
+        && resource.data.ativo == false
+        && request.resource.data.papeis == resource.data.papeis
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ativo', 'militarId'])
+        && request.resource.data.ativo == true
+        && exists(/databases/$(database)/documents/militares/$(request.resource.data.militarId))
+        && get(/databases/$(database)/documents/militares/$(request.resource.data.militarId)).data.ubmId == resource.data.ubmId
+        && get(/databases/$(database)/documents/militares/$(request.resource.data.militarId)).data.matricula == resource.data.matricula;
     }
 
     // Índice público mínimo matrícula -> e-mail, para permitir login por
@@ -120,12 +130,13 @@ service cloud.firestore {
     match /ubms/{documento} {
       allow read: if true;
       allow create, delete: if master();
-      // Comandante da própria UBM pode atualizar os dados institucionais
-      // (brasão, endereço, contato) — nunca criar ou excluir uma UBM.
+      // Comandante OU Escalante da própria UBM podem atualizar os dados
+      // institucionais (brasão, endereço, contato) e confirmar
+      // `efetivoCompleto` — nunca criar ou excluir uma UBM.
       allow update: if master()
-        || (comandanteDaUbm(documento)
+        || (gestaoDaUbm(documento)
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['nome', 'sigla', 'logoDataUrl', 'endereco', 'cep', 'bairro', 'cidade', 'email', 'telefone']));
+            .hasOnly(['nome', 'sigla', 'logoDataUrl', 'endereco', 'cep', 'bairro', 'cidade', 'email', 'telefone', 'efetivoCompleto']));
     }
     // Comandos (CRB/COP) são cadastrados pelo master, junto com quais UBMs
     // ficam vinculadas a cada um (ver nota em types.ts).
@@ -134,7 +145,13 @@ service cloud.firestore {
       allow write: if master();
     }
     match /militares/{documento} {
-      allow read: if ativo();
+      // Além de qualquer usuário ativo, uma conta recém-criada (ainda
+      // inativa) pode ler SÓ o próprio registro de Militar — mesma
+      // matrícula da própria `usuarios/{uid}` — pra checar no primeiro
+      // acesso se o escalante já a incluiu no Efetivo (ver
+      // `primeiroAcessoPorMatricula`); nunca dá pra ler o efetivo alheio.
+      allow read: if ativo()
+        || (autenticado() && resource.data.matricula == perfilDoc().matricula);
       allow create: if podeGerenciarUbm(request.resource.data.ubmId);
       allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }

@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Search, UserPlus, ListPlus, Trash2, Edit2, X, ArrowLeftRight } from 'lucide-react';
+import { Search, UserPlus, ListPlus, Trash2, Edit2, X, ArrowLeftRight, CheckCircle2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { buscarEfetivoDaPlanilha } from '../../lib/planilhaEfetivo';
+import { buscarEfetivoDaPlanilha, normalizarMatricula } from '../../lib/planilhaEfetivo';
 import type { LinhaMilitar } from '../../lib/csvMilitares';
 import MilitarPlanilhaAutocomplete from '../../components/MilitarPlanilhaAutocomplete';
 import { Militar, temPapel } from '../../types';
 
 export default function Efetivo() {
-  const { usuarioAtual, militares, ubms, funcoes, addMilitar, updateMilitar, deleteMilitar, transferirMilitarDeUbm } = useApp();
+  const { usuarioAtual, militares, ubms, funcoes, addMilitar, updateMilitar, deleteMilitar, transferirMilitarDeUbm, updateUbm } = useApp();
+  const [confirmandoEfetivoCompleto, setConfirmandoEfetivoCompleto] = useState(false);
 
   const [busca, setBusca] = useState('');
   const [militarEditando, setMilitarEditando] = useState<Militar | null>(null);
@@ -29,6 +30,7 @@ export default function Efetivo() {
   }
 
   const ubmId = usuarioAtual!.ubmId;
+  const ubmAtual = ubms.find((u) => u.id === ubmId);
   const militaresDaUbm = militares.filter((m) => m.ubmId === ubmId);
   const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
   const nomeDaFuncao = (funcaoId: string) => funcoes.find((f) => f.id === funcaoId)?.nome ?? 'Função removida';
@@ -53,15 +55,18 @@ export default function Efetivo() {
     }
   };
 
+  // Matrícula sempre normalizada (sem zeros à esquerda) ao gravar — é o
+  // mesmo formato usado pra vincular a conta no primeiro acesso (ver
+  // `primeiroAcessoPorMatricula`), então precisa bater exatamente aqui.
   const jaCadastradoNaUbm = (matricula: string) =>
-    !!matricula && militaresDaUbm.some((m) => m.matricula === matricula);
+    !!matricula && militaresDaUbm.some((m) => m.matricula === normalizarMatricula(matricula));
 
   const handleInserirDaPlanilha = async () => {
     if (!selecionadoPlanilha) return;
     await addMilitar({
       nome: selecionadoPlanilha.nome,
       posto: selecionadoPlanilha.posto,
-      matricula: selecionadoPlanilha.matricula,
+      matricula: normalizarMatricula(selecionadoPlanilha.matricula),
       ubmId,
       funcoes: [],
       ativo: true,
@@ -77,7 +82,7 @@ export default function Efetivo() {
     await addMilitar({
       nome: novoMilitarForm.nome,
       posto: novoMilitarForm.posto,
-      matricula: novoMilitarForm.matricula,
+      matricula: normalizarMatricula(novoMilitarForm.matricula),
       ubmId,
       funcoes: [],
       ativo: true,
@@ -99,6 +104,16 @@ export default function Efetivo() {
     await transferirMilitarDeUbm(transferindo.id, novaUbmId);
     setTransferindo(null);
     setNovaUbmId('');
+  };
+
+  const handleConfirmarEfetivoCompleto = async () => {
+    if (!window.confirm('Confirma que todo o efetivo da UBM já foi cadastrado aqui? Essa ação libera a geração automática de previsões futuras de escala e não pode ser desfeita.')) return;
+    setConfirmandoEfetivoCompleto(true);
+    try {
+      await updateUbm(ubmId, { efetivoCompleto: true });
+    } finally {
+      setConfirmandoEfetivoCompleto(false);
+    }
   };
 
   return (
@@ -123,6 +138,23 @@ export default function Efetivo() {
           </button>
         </div>
       </div>
+
+      {ubmAtual && !ubmAtual.efetivoCompleto && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-md p-4">
+          <p className="text-sm text-amber-800">
+            Enquanto o efetivo não for confirmado como completo, a geração automática de previsões futuras de escala
+            fica bloqueada — a primeira semana deve ser montada manualmente. Confirme só depois de cadastrar todo
+            mundo.
+          </p>
+          <button
+            onClick={handleConfirmarEfetivoCompleto}
+            disabled={confirmandoEfetivoCompleto}
+            className="shrink-0 inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50"
+          >
+            <CheckCircle2 className="-ml-1 mr-2 h-5 w-5" /> {confirmandoEfetivoCompleto ? 'Confirmando...' : 'Concluí a inclusão do efetivo'}
+          </button>
+        </div>
+      )}
 
       <div className="bg-white shadow-sm rounded-lg border border-gray-200">
         <div className="p-4 border-b border-gray-200">
