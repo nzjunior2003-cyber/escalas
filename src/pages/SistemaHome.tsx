@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { Users, CalendarDays, Send, UserX, Building2, ShieldCheck } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatarDataISO } from '../lib/escala';
@@ -8,17 +9,25 @@ interface KpiCardProps {
   valor: number | string;
   icone: React.ElementType;
   cor: string;
+  href?: string;
 }
 
-function KpiCard({ titulo, valor, icone: Icone, cor }: KpiCardProps) {
-  return (
-    <div className={`bg-white rounded-lg shadow-sm border-l-4 ${cor} p-4 sm:p-5 flex items-center justify-between`}>
+function KpiCard({ titulo, valor, icone: Icone, cor, href }: KpiCardProps) {
+  const conteudo = (
+    <>
       <div>
         <p className="text-sm text-gray-500">{titulo}</p>
         <p className="text-2xl font-bold text-gray-900 mt-1">{valor}</p>
       </div>
       <Icone className="w-8 h-8 text-gray-300" />
-    </div>
+    </>
+  );
+  const classes = `bg-white rounded-lg shadow-sm border-l-4 ${cor} p-4 sm:p-5 flex items-center justify-between`;
+  if (!href) return <div className={classes}>{conteudo}</div>;
+  return (
+    <Link to={href} className={`${classes} hover:shadow-md hover:bg-gray-50 transition-shadow`}>
+      {conteudo}
+    </Link>
   );
 }
 
@@ -80,6 +89,7 @@ export default function SistemaHome() {
   const ubmId = usuarioAtual?.ubmId;
   const ubm = ubms.find((u) => u.id === ubmId);
   const hoje = formatarDataISO(new Date());
+  const isGestao = temPapel(usuarioAtual, 'comandante') || temPapel(usuarioAtual, 'escalante');
 
   const militaresDaUbm = militares.filter((m) => m.ubmId === ubmId && m.ativo);
   const escaladosHoje =
@@ -97,10 +107,10 @@ export default function SistemaHome() {
       <CabecalhoBrasao logoSrc={ubm?.logoDataUrl || '/brasao-duplo-cbmpa-cedec.png'} subtitulo={ubm?.nome ?? 'Unidade de Bombeiro Militar'} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard titulo="Efetivo ativo" valor={militaresDaUbm.length} icone={Users} cor="border-l-blue-500" />
-        <KpiCard titulo="Escalados hoje" valor={escaladosHoje} icone={CalendarDays} cor="border-l-emerald-500" />
-        <KpiCard titulo="Solicitações pendentes" valor={solicitacoesPendentes} icone={Send} cor="border-l-amber-500" />
-        <KpiCard titulo="Afastados hoje" valor={afastamentosAtivos} icone={UserX} cor="border-l-red-500" />
+        <KpiCard titulo="Efetivo ativo" valor={militaresDaUbm.length} icone={Users} cor="border-l-blue-500" href={isGestao ? '/sistema/efetivo' : undefined} />
+        <KpiCard titulo="Escalados hoje" valor={escaladosHoje} icone={CalendarDays} cor="border-l-emerald-500" href="/sistema/escala" />
+        <KpiCard titulo="Solicitações pendentes" valor={solicitacoesPendentes} icone={Send} cor="border-l-amber-500" href="/sistema/solicitacoes" />
+        <KpiCard titulo="Afastados hoje" valor={afastamentosAtivos} icone={UserX} cor="border-l-red-500" href={isGestao ? '/sistema/afastamentos' : undefined} />
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
