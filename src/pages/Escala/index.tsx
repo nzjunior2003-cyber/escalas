@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarDays, Plus, Sparkles } from 'lucide-react';
+import { CalendarDays, Plus, Sparkles, Lock, Megaphone, HandHeart, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { formatarDataISO } from '../../lib/escala';
-import { FUNCAO_LABELS, FuncaoOperacional, temPapel } from '../../types';
+import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, ordenarCandidatosExtraordinario, previsaoLiberada, semanaInicioDe } from '../../lib/escala';
+import { STATUS_VAGA_VOLUNTARIA_LABELS, temPapel } from '../../types';
+import type { EscalaOrdinaria, FuncaoUbm, Militar } from '../../types';
 
-const TODAS_FUNCOES = Object.keys(FUNCAO_LABELS) as FuncaoOperacional[];
 type Aba = 'ordinaria' | 'extraordinaria' | 'diferenciada';
 type Granularidade = 'semanal' | 'mensal' | 'anual';
 
@@ -28,23 +28,63 @@ function intervaloPorGranularidade(granularidade: Granularidade, base: Date): { 
 }
 
 export default function Escala() {
-  const { usuarioAtual, militares, escalasOrdinarias, gerarEPersistirEscalaOrdinaria, updateEscalaOrdinaria } = useApp();
+  const {
+    usuarioAtual,
+    ubms,
+    militares,
+    funcoes,
+    escalasOrdinarias,
+    fechamentosEscala,
+    gerarEPersistirEscalaOrdinaria,
+    updateEscalaOrdinaria,
+    moverDataEscalaOrdinaria,
+    adicionarEscalaOrdinaria,
+    deleteEscalaOrdinaria,
+    moverOrdemFuncao,
+  } = useApp();
   const [aba, setAba] = useState<Aba>('ordinaria');
   const [granularidade, setGranularidade] = useState<Granularidade>('semanal');
-  const [funcaoSelecionada, setFuncaoSelecionada] = useState<FuncaoOperacional>('guarnicao');
+  const [funcaoSelecionada, setFuncaoSelecionada] = useState<string>('');
   const [gerando, setGerando] = useState(false);
+  const [gerandoFuncaoId, setGerandoFuncaoId] = useState<string | null>(null);
+  const [arrastando, setArrastando] = useState<{ id: string; funcao: string; data: string; militarId: string } | null>(null);
 
   const ubmId = usuarioAtual?.ubmId ?? '';
   const isEscalante = temPapel(usuarioAtual, 'escalante');
   const { inicio, fim, dias } = useMemo(() => intervaloPorGranularidade(granularidade, new Date()), [granularidade]);
 
-  const militaresDaFuncaoNaUbm = militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(funcaoSelecionada));
+  const funcoesDaUbm = funcoes
+    .filter((f) => f.ubmId === ubmId && f.ativa)
+    .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0) || String(a.criado_em ?? '').localeCompare(String(b.criado_em ?? '')));
+  useEffect(() => {
+    if (!funcaoSelecionada && funcoesDaUbm.length > 0) setFuncaoSelecionada(funcoesDaUbm[0].id);
+  }, [funcaoSelecionada, funcoesDaUbm]);
+  const nomeDaFuncaoSelecionada = funcoes.find((f) => f.id === funcaoSelecionada)?.nome ?? '';
 
+  const militaresDaFuncaoNaUbm = militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(funcaoSelecionada));
+  const militaresDaFuncao = (funcaoId: string) => militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(funcaoId));
+
+  const ubmAtual = ubms.find((u) => u.id === ubmId);
+  const escalasOrdinariasDaUbm = escalasOrdinarias.filter((e) => e.ubmId === ubmId);
+  const podeGerarPrevisao = previsaoLiberada(ubmAtual, funcoesDaUbm, escalasOrdinariasDaUbm);
+
+  const estaTravada = (data: string) => {
+    const docId = `${ubmId}_ordinaria_${semanaInicioDe(data)}`;
+    return fechamentosEscala.find((f) => f.id === docId)?.travada ?? false;
+  };
+
+  // A geração sempre roda pra UBM inteira (todas as funções ativas juntas)
+  // — nunca uma função isolada, senão o sistema não teria como saber que um
+  // militar com múltiplas funções já foi escalado em outra no mesmo dia.
   const handleGerar = async () => {
+    if (!podeGerarPrevisao) {
+      alert('A geração automática só libera depois que o efetivo estiver completo e a primeira semana (todas as funções, 7 dias) estiver preenchida manualmente.');
+      return;
+    }
     setGerando(true);
     try {
-      const total = await gerarEPersistirEscalaOrdinaria({ ubmId, funcao: funcaoSelecionada, dataInicio: inicio, dataFim: fim });
-      alert(`Previsão gerada: ${total} dias de escala para ${FUNCAO_LABELS[funcaoSelecionada]}.`);
+      const total = await gerarEPersistirEscalaOrdinaria({ ubmId, dataInicio: inicio, dataFim: fim });
+      alert(`Previsão gerada: ${total} dias de escala no período, considerando todas as funções da UBM.`);
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível gerar a escala.');
     } finally {
@@ -52,9 +92,52 @@ export default function Escala() {
     }
   };
 
+  const handleGerarFuncao = async (funcaoId: string) => {
+    if (!podeGerarPrevisao) {
+      alert('A geração automática só libera depois que o efetivo estiver completo e a primeira semana (todas as funções, 7 dias) estiver preenchida manualmente.');
+      return;
+    }
+    if (militaresDaFuncao(funcaoId).length === 0) {
+      alert(`Nenhum militar ativo com essa função nesta UBM. Atribua a função no módulo Efetivo.`);
+      return;
+    }
+    setGerandoFuncaoId(funcaoId);
+    try {
+      // Gera pra UBM inteira mesmo clicando no ícone de uma função só — as
+      // outras funções já preenchidas simplesmente não mudam (ver nota em
+      // gerarEscalaOrdinariaUbm), então é seguro disparar daqui.
+      await gerarEPersistirEscalaOrdinaria({ ubmId, dataInicio: inicio, dataFim: fim });
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível gerar a escala.');
+    } finally {
+      setGerandoFuncaoId(null);
+    }
+  };
+
   const escalasDoPeriodo = escalasOrdinarias.filter(
     (e) => e.ubmId === ubmId && e.funcao === funcaoSelecionada && e.data >= inicio && e.data <= fim,
   );
+
+  const escalasDaSemana = escalasOrdinarias.filter(
+    (e) => e.ubmId === ubmId && dias.includes(e.data) && funcoesDaUbm.some((f) => f.id === e.funcao),
+  );
+
+  const handleSoltar = async (funcaoId: string, dia: string, entradasDestino: EscalaOrdinaria[]) => {
+    const origem = arrastando;
+    setArrastando(null);
+    if (!origem) return;
+    if (origem.funcao !== funcaoId || origem.data === dia) return;
+    if (estaTravada(dia) || estaTravada(origem.data)) return;
+    if (entradasDestino.some((e) => e.militarId === origem.militarId)) {
+      alert('Esse militar já está escalado nessa função nesse dia.');
+      return;
+    }
+    try {
+      await moverDataEscalaOrdinaria(origem.id, dia);
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível mover essa escala.');
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -78,11 +161,14 @@ export default function Escala() {
       {aba === 'ordinaria' && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-3 bg-white p-4 rounded-lg border border-gray-200">
-            <select value={funcaoSelecionada} onChange={(e) => setFuncaoSelecionada(e.target.value as FuncaoOperacional)} className="border border-gray-300 rounded-md text-sm py-2 px-3">
-              {TODAS_FUNCOES.map((f) => (
-                <option key={f} value={f}>{FUNCAO_LABELS[f]}</option>
-              ))}
-            </select>
+            {granularidade !== 'semanal' && (
+              <select value={funcaoSelecionada} onChange={(e) => setFuncaoSelecionada(e.target.value)} className="border border-gray-300 rounded-md text-sm py-2 px-3">
+                {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+                {funcoesDaUbm.map((f) => (
+                  <option key={f.id} value={f.id}>{f.nome}</option>
+                ))}
+              </select>
+            )}
             <div className="flex gap-1">
               {(['semanal', 'mensal', 'anual'] as Granularidade[]).map((g) => (
                 <button
@@ -94,10 +180,11 @@ export default function Escala() {
                 </button>
               ))}
             </div>
-            {isEscalante && (
+            {isEscalante && granularidade !== 'semanal' && (
               <button
                 onClick={handleGerar}
-                disabled={gerando || militaresDaFuncaoNaUbm.length === 0}
+                disabled={gerando || militaresDaFuncaoNaUbm.length === 0 || !podeGerarPrevisao}
+                title={podeGerarPrevisao ? undefined : 'Confirme o efetivo completo e preencha a primeira semana manualmente antes de gerar previsões.'}
                 className="ml-auto inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50"
               >
                 <Sparkles className="-ml-1 mr-2 h-4 w-4" /> {gerando ? 'Gerando...' : 'Gerar previsão'}
@@ -105,46 +192,64 @@ export default function Escala() {
             )}
           </div>
 
-          {militaresDaFuncaoNaUbm.length === 0 && (
+          {isEscalante && !podeGerarPrevisao && (
             <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
-              Nenhum militar ativo com a função "{FUNCAO_LABELS[funcaoSelecionada]}" nesta UBM. Atribua a função no módulo Efetivo.
+              A geração automática de previsões futuras ainda está bloqueada: confirme que terminou de cadastrar o
+              efetivo (em "Efetivo") e preencha manualmente a primeira semana — todas as funções, nos 7 dias — antes
+              de liberar.
             </p>
           )}
 
+          {funcoesDaUbm.length === 0 ? (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
+              Nenhuma função cadastrada nesta UBM ainda. Cadastre em "Funções" antes de gerar a escala.
+            </p>
+          ) : granularidade !== 'semanal' && militaresDaFuncaoNaUbm.length === 0 ? (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
+              Nenhum militar ativo com a função "{nomeDaFuncaoSelecionada}" nesta UBM. Atribua a função no módulo Efetivo.
+            </p>
+          ) : null}
+
           {granularidade === 'semanal' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
-              {dias.map((dia) => {
-                const doDia = escalasDoPeriodo.filter((e) => e.data === dia);
-                return (
-                  <div key={dia} className="bg-white rounded-lg border border-gray-200 p-3 min-h-[140px]">
-                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
-                      {format(new Date(dia + 'T00:00:00'), "EEE dd/MM", { locale: ptBR })}
-                    </p>
-                    <div className="space-y-2">
-                      {doDia.length === 0 && <p className="text-xs text-gray-400">Sem escala</p>}
-                      {doDia.map((e) => {
-                        const militar = militares.find((m) => m.id === e.militarId);
-                        return (
-                          <div key={e.id} className="bg-red-50 border border-red-100 rounded-md p-2 text-xs">
-                            <p className="font-medium text-red-900">{militar?.nome ?? 'Militar removido'}</p>
-                            {isEscalante && (
-                              <select
-                                className="mt-1 w-full text-xs border-gray-200 rounded"
-                                value={e.militarId}
-                                onChange={(ev) => updateEscalaOrdinaria(e.id, ev.target.value)}
-                              >
-                                {militaresDaFuncaoNaUbm.map((m) => (
-                                  <option key={m.id} value={m.id}>{m.nome}</option>
-                                ))}
-                              </select>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+            <div className="overflow-x-auto">
+              <div className="min-w-[880px] grid gap-2" style={{ gridTemplateColumns: '180px repeat(7, minmax(110px, 1fr))' }}>
+                <div />
+                {dias.map((dia) => (
+                  <div key={dia} className="text-xs font-semibold text-gray-500 uppercase text-center py-2 flex items-center justify-center gap-1">
+                    {format(new Date(dia + 'T00:00:00'), "EEE dd/MM", { locale: ptBR })}
+                    {estaTravada(dia) && <span title="Semana fechada"><Lock className="w-3 h-3 text-gray-400" /></span>}
                   </div>
-                );
-              })}
+                ))}
+
+                {funcoesDaUbm.map((f, indice) => (
+                  <FuncaoLinha
+                    key={f.id}
+                    funcao={f}
+                    dias={dias}
+                    escalasDaSemana={escalasDaSemana}
+                    militares={militares}
+                    militaresDaFuncao={militaresDaFuncao(f.id)}
+                    isEscalante={isEscalante}
+                    estaTravada={estaTravada}
+                    arrastando={arrastando}
+                    setArrastando={setArrastando}
+                    onSoltar={handleSoltar}
+                    updateEscalaOrdinaria={updateEscalaOrdinaria}
+                    onAdicionar={(militarId, data) => adicionarEscalaOrdinaria({ ubmId, funcao: f.id, data, militarId })}
+                    onRemover={deleteEscalaOrdinaria}
+                    gerando={gerandoFuncaoId === f.id}
+                    onGerar={() => handleGerarFuncao(f.id)}
+                    podeSubir={indice > 0}
+                    podeDescer={indice < funcoesDaUbm.length - 1}
+                    onMover={(direcao) => moverOrdemFuncao(ubmId, f.id, direcao)}
+                  />
+                ))}
+              </div>
+              {isEscalante && (
+                <p className="text-xs text-gray-400 mt-2">
+                  Mais de um militar pode estar na mesma função no mesmo dia — use o "+" pra adicionar, arraste um cartão pra mudar de dia, ou use o seletor no cartão pra trocar quem está nele.
+                </p>
+              )}
             </div>
           ) : (
             <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
@@ -182,19 +287,264 @@ export default function Escala() {
   );
 }
 
+/**
+ * Uma linha do Kanban semanal (8 células — rótulo da função + 7 dias) como
+ * filhos diretos do grid do componente pai (por isso o Fragment: não pode
+ * envolver as células numa div, ou elas parariam de fazer parte do grid).
+ */
+/** Posto + nome de guerra (ou nome completo, se ainda não tiver nome de guerra cadastrado) — mais curto que o nome completo, pra caber no cartão sem cortar. */
+function nomeCurto(militar?: Militar): string {
+  if (!militar) return 'Militar removido';
+  const nome = militar.nomeGuerra || militar.nome;
+  return militar.posto ? `${militar.posto} ${nome}` : nome;
+}
+
+function FuncaoLinha({
+  funcao,
+  dias,
+  escalasDaSemana,
+  militares,
+  militaresDaFuncao,
+  isEscalante,
+  estaTravada,
+  arrastando,
+  setArrastando,
+  onSoltar,
+  updateEscalaOrdinaria,
+  onAdicionar,
+  onRemover,
+  gerando,
+  onGerar,
+  podeSubir,
+  podeDescer,
+  onMover,
+}: {
+  funcao: FuncaoUbm;
+  dias: string[];
+  escalasDaSemana: EscalaOrdinaria[];
+  militares: Militar[];
+  militaresDaFuncao: Militar[];
+  isEscalante: boolean;
+  estaTravada: (data: string) => boolean;
+  arrastando: { id: string; funcao: string; data: string; militarId: string } | null;
+  setArrastando: (v: { id: string; funcao: string; data: string; militarId: string } | null) => void;
+  onSoltar: (funcaoId: string, dia: string, entradasDestino: EscalaOrdinaria[]) => void;
+  updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
+  onAdicionar: (militarId: string, data: string) => Promise<void>;
+  onRemover: (id: string) => Promise<void>;
+  gerando: boolean;
+  onGerar: () => void;
+  podeSubir: boolean;
+  podeDescer: boolean;
+  onMover: (direcao: 'cima' | 'baixo') => void;
+}) {
+  const escalasDaFuncao = escalasDaSemana.filter((e) => e.funcao === funcao.id);
+  const [adicionandoEm, setAdicionandoEm] = useState<string | null>(null);
+  const [trocandoId, setTrocandoId] = useState<string | null>(null);
+
+  return (
+    <Fragment>
+      <div className="bg-white border border-gray-200 rounded-lg px-2 py-2 flex items-center gap-1 sticky left-0">
+        {isEscalante && (
+          <div className="flex flex-col shrink-0 -my-1">
+            <button
+              onClick={() => onMover('cima')}
+              disabled={!podeSubir}
+              title="Mover função pra cima"
+              className="text-gray-300 hover:text-red-700 disabled:opacity-30 disabled:hover:text-gray-300 leading-none"
+            >
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => onMover('baixo')}
+              disabled={!podeDescer}
+              title="Mover função pra baixo"
+              className="text-gray-300 hover:text-red-700 disabled:opacity-30 disabled:hover:text-gray-300 leading-none"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+        <span className="text-sm font-medium text-gray-800 truncate flex-1" title={funcao.nome}>{funcao.nome}</span>
+        {isEscalante && (
+          <button
+            onClick={onGerar}
+            disabled={gerando}
+            title="Gerar previsão pra essa função"
+            className="shrink-0 p-1 -m-1 text-gray-400 hover:text-red-700 disabled:opacity-50"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {dias.map((dia) => {
+        const entradas = escalasDaFuncao.filter((e) => e.data === dia);
+        const travada = estaTravada(dia);
+        const podeSoltarAqui = isEscalante && !travada && !!arrastando && arrastando.funcao === funcao.id && arrastando.data !== dia;
+        const candidatosParaAdicionar = militaresDaFuncao.filter((m) => !entradas.some((e) => e.militarId === m.id));
+        const emAdicao = adicionandoEm === dia;
+
+        return (
+          <div
+            key={funcao.id + dia}
+            onDragOver={(ev) => {
+              if (podeSoltarAqui) ev.preventDefault();
+            }}
+            onDrop={() => onSoltar(funcao.id, dia, entradas)}
+            className={`min-h-[64px] rounded-lg p-1.5 border border-dashed space-y-1 ${podeSoltarAqui ? 'border-red-300 bg-red-50/50' : 'border-gray-200 bg-gray-50'}`}
+          >
+            {entradas.length === 0 && !isEscalante && <p className="text-[11px] text-gray-300 text-center pt-5">Sem escala</p>}
+
+            {entradas.map((entrada) => {
+              const militar = militares.find((m) => m.id === entrada.militarId);
+              const podeArrastar = isEscalante && !travada && entrada.origem !== 'diferenciada';
+              const candidatosDoCartao = [militar, ...militaresDaFuncao.filter((m) => m.id !== entrada.militarId)].filter(
+                (m): m is Militar => !!m,
+              );
+
+              return (
+                <div
+                  key={entrada.id}
+                  draggable={podeArrastar}
+                  onDragStart={() => setArrastando({ id: entrada.id, funcao: funcao.id, data: entrada.data, militarId: entrada.militarId })}
+                  onDragEnd={() => setArrastando(null)}
+                  className={`bg-red-50 border border-red-100 rounded-md p-1.5 text-[11px] ${podeArrastar ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                  title={nomeCurto(militar)}
+                >
+                  {trocandoId === entrada.id ? (
+                    <select
+                      autoFocus
+                      className="w-full text-[10px] border-gray-300 rounded"
+                      defaultValue={entrada.militarId}
+                      onChange={(ev) => {
+                        setTrocandoId(null);
+                        if (ev.target.value !== entrada.militarId) updateEscalaOrdinaria(entrada.id, ev.target.value);
+                      }}
+                      onBlur={() => setTrocandoId(null)}
+                    >
+                      {candidatosDoCartao.map((m) => (
+                        <option key={m.id} value={m.id}>{nomeCurto(m)}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="flex items-start gap-1">
+                      <p className="font-medium text-red-900 leading-tight truncate flex-1">{nomeCurto(militar)}</p>
+                      {isEscalante && !travada && entrada.origem !== 'diferenciada' && candidatosDoCartao.length > 1 && (
+                        <button
+                          onClick={() => setTrocandoId(entrada.id)}
+                          title="Trocar militar"
+                          className="shrink-0 text-red-300 hover:text-red-700 p-0.5 -m-0.5"
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                        </button>
+                      )}
+                      {isEscalante && !travada && entrada.origem !== 'diferenciada' && (
+                        <button
+                          onClick={() => onRemover(entrada.id)}
+                          title="Remover"
+                          className="shrink-0 text-red-300 hover:text-red-700 p-0.5 -m-0.5"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {entrada.origem === 'diferenciada' && (
+                    <p className="text-[9px] uppercase text-amber-600 font-semibold">diferenciada</p>
+                  )}
+                </div>
+              );
+            })}
+
+            {isEscalante && !travada && (
+              emAdicao ? (
+                <select
+                  autoFocus
+                  className="w-full text-[10px] border-gray-300 rounded"
+                  defaultValue=""
+                  onChange={(ev) => {
+                    const militarId = ev.target.value;
+                    setAdicionandoEm(null);
+                    if (militarId) onAdicionar(militarId, dia);
+                  }}
+                  onBlur={() => setAdicionandoEm(null)}
+                >
+                  <option value="" disabled>Escolher militar...</option>
+                  {candidatosParaAdicionar.map((m) => (
+                    <option key={m.id} value={m.id}>{nomeCurto(m)}</option>
+                  ))}
+                </select>
+              ) : (
+                <button
+                  onClick={() => setAdicionandoEm(dia)}
+                  disabled={candidatosParaAdicionar.length === 0}
+                  className="w-full text-[11px] text-gray-400 hover:text-red-700 disabled:opacity-30 border border-dashed border-gray-300 rounded-md py-1"
+                >
+                  + Adicionar
+                </button>
+              )
+            )}
+          </div>
+        );
+      })}
+    </Fragment>
+  );
+}
+
 function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante: boolean }) {
-  const { militares, escalasExtraordinarias, criarEscalaExtraordinaria, alterarMilitarExtraordinaria } = useApp();
-  const [form, setForm] = useState({ funcao: 'guarnicao' as FuncaoOperacional, data: formatarDataISO(new Date()), motivo: '' });
+  const {
+    usuarioAtual,
+    militares,
+    funcoes,
+    afastamentos,
+    escalasOrdinarias,
+    escalasExtraordinarias,
+    fechamentosEscala,
+    vagasVoluntariasExtraordinarias,
+    criarEscalaExtraordinaria,
+    alterarMilitarExtraordinaria,
+    deleteEscalaExtraordinaria,
+    dispararVagaVoluntariaExtraordinaria,
+    voluntariarParaVaga,
+    resolverVagaCompulsoriamente,
+  } = useApp();
+  const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
+  const [form, setForm] = useState({ funcao: '', data: formatarDataISO(new Date()), motivo: '' });
   const [criando, setCriando] = useState(false);
+  const [formVaga, setFormVaga] = useState({ funcao: '', data: formatarDataISO(new Date()), motivo: '', prazo: formatarDataISO(new Date()), quantidade: 1 });
+  const [disparando, setDisparando] = useState(false);
+  const [processandoVagaId, setProcessandoVagaId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!form.funcao && funcoesDaUbm.length > 0) setForm((f) => ({ ...f, funcao: funcoesDaUbm[0].id }));
+  }, [form.funcao, funcoesDaUbm]);
+  useEffect(() => {
+    if (!formVaga.funcao && funcoesDaUbm.length > 0) setFormVaga((f) => ({ ...f, funcao: funcoesDaUbm[0].id }));
+  }, [formVaga.funcao, funcoesDaUbm]);
 
   const doUbm = escalasExtraordinarias.filter((e) => e.ubmId === ubmId).sort((a, b) => b.data.localeCompare(a.data));
+  const nomeDaFuncao = (funcaoId: string) => funcoes.find((f) => f.id === funcaoId)?.nome ?? 'Função removida';
+  const nomeMilitar = (id?: string) => militares.find((m) => m.id === id)?.nome ?? '—';
+  const estaTravada = (data: string) => {
+    const docId = `${ubmId}_extraordinaria_${semanaInicioDe(data)}`;
+    return fechamentosEscala.find((f) => f.id === docId)?.travada ?? false;
+  };
+
+  const hoje = formatarDataISO(new Date());
+  const meuMilitarId = usuarioAtual?.militarId;
+  const vagasDaUbm = vagasVoluntariasExtraordinarias
+    .filter((v) => v.ubmId === ubmId)
+    .sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+  const vagasAbertas = vagasDaUbm.filter((v) => v.status === 'aberta');
+  const vagasResolvidas = vagasDaUbm.filter((v) => v.status !== 'aberta').slice(0, 15);
 
   const handleCriar = async (e: FormEvent) => {
     e.preventDefault();
     setCriando(true);
     try {
       await criarEscalaExtraordinaria({ ubmId, ...form });
-      setForm({ funcao: 'guarnicao', data: formatarDataISO(new Date()), motivo: '' });
+      setForm({ funcao: funcoesDaUbm[0]?.id ?? '', data: formatarDataISO(new Date()), motivo: '' });
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível criar a escala extraordinária.');
     } finally {
@@ -202,69 +552,268 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
     }
   };
 
+  const handleDisparar = async (e: FormEvent) => {
+    e.preventDefault();
+    setDisparando(true);
+    try {
+      await dispararVagaVoluntariaExtraordinaria({ ubmId, ...formVaga, quantidade: Math.max(1, formVaga.quantidade) });
+      setFormVaga({ funcao: funcoesDaUbm[0]?.id ?? '', data: formatarDataISO(new Date()), motivo: '', prazo: formatarDataISO(new Date()), quantidade: 1 });
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível disparar a vaga pra voluntariado.');
+    } finally {
+      setDisparando(false);
+    }
+  };
+
+  const handleVoluntariar = async (vagaId: string) => {
+    setProcessandoVagaId(vagaId);
+    try {
+      await voluntariarParaVaga(vagaId);
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível se voluntariar pra essa vaga.');
+    } finally {
+      setProcessandoVagaId(null);
+    }
+  };
+
+  const handleResolverCompulsorio = async (vagaId: string) => {
+    setProcessandoVagaId(vagaId);
+    try {
+      await resolverVagaCompulsoriamente(vagaId);
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível resolver essa vaga compulsoriamente.');
+    } finally {
+      setProcessandoVagaId(null);
+    }
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {isEscalante && (
-        <form onSubmit={handleCriar} className="bg-white p-4 rounded-lg border border-gray-200 flex flex-wrap gap-3 items-end">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
-            <select value={form.funcao} onChange={(e) => setForm({ ...form, funcao: e.target.value as FuncaoOperacional })} className="border border-gray-300 rounded-md text-sm py-2 px-3">
-              {TODAS_FUNCOES.map((f) => <option key={f} value={f}>{FUNCAO_LABELS[f]}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Data</label>
-            <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} className="border border-gray-300 rounded-md text-sm py-2 px-3" />
-          </div>
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs font-medium text-gray-500 mb-1">Motivo (ex.: reforço para evento)</label>
-            <input required value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
-          </div>
-          <button type="submit" disabled={criando} className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50">
-            <Plus className="-ml-1 mr-2 h-4 w-4" /> Sugerir e cadastrar
-          </button>
-        </form>
+        <div className="space-y-4">
+          <form onSubmit={handleDisparar} className="bg-white p-4 rounded-lg border border-gray-200 space-y-3">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+              <Megaphone className="w-4 h-4 text-red-600" /> Disparar vaga pra voluntários
+            </h3>
+            <p className="text-xs text-gray-500">
+              Extraordinária é voluntária por natureza. O efetivo elegível recebe alerta com prazo; assim que alguém se
+              voluntariar, o sistema já confirma. Se ninguém se voluntariar até o prazo, você resolve compulsoriamente.
+            </p>
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-3 sm:items-end">
+              <div className="min-w-0 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
+                <select value={formVaga.funcao} onChange={(e) => setFormVaga({ ...formVaga, funcao: e.target.value })} className="w-full sm:w-auto max-w-full border border-gray-300 rounded-md text-sm py-2 px-3">
+                  {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+                  {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                </select>
+              </div>
+              <div className="min-w-0 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Data do serviço</label>
+                <input type="date" value={formVaga.data} onChange={(e) => setFormVaga({ ...formVaga, data: e.target.value })} className="w-full sm:w-auto border border-gray-300 rounded-md text-sm py-2 px-3" />
+              </div>
+              <div className="min-w-0 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Prazo pra se voluntariar</label>
+                <input type="date" value={formVaga.prazo} onChange={(e) => setFormVaga({ ...formVaga, prazo: e.target.value })} className="w-full sm:w-auto border border-gray-300 rounded-md text-sm py-2 px-3" />
+              </div>
+              <div className="min-w-0 w-full sm:w-24">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Quantidade</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={formVaga.quantidade}
+                  onChange={(e) => setFormVaga({ ...formVaga, quantidade: Math.max(1, Number(e.target.value) || 1) })}
+                  className="w-full border border-gray-300 rounded-md text-sm py-2 px-3"
+                />
+              </div>
+              <div className="min-w-0 w-full sm:flex-1">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Motivo (ex.: reforço para evento)</label>
+                <input required value={formVaga.motivo} onChange={(e) => setFormVaga({ ...formVaga, motivo: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
+              </div>
+              <button type="submit" disabled={disparando} className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50">
+                <Megaphone className="-ml-1 mr-2 h-4 w-4" /> {disparando ? 'Disparando...' : 'Disparar vaga'}
+              </button>
+            </div>
+          </form>
+
+          <details className="bg-white p-4 rounded-lg border border-gray-200">
+            <summary className="text-sm font-semibold text-gray-700 cursor-pointer">Escalar direto, sem passar por voluntariado</summary>
+            <form onSubmit={handleCriar} className="mt-3 grid grid-cols-1 sm:flex sm:flex-wrap gap-3 sm:items-end">
+              <div className="min-w-0 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
+                <select value={form.funcao} onChange={(e) => setForm({ ...form, funcao: e.target.value })} className="w-full sm:w-auto border border-gray-300 rounded-md text-sm py-2 px-3">
+                  {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+                  {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                </select>
+              </div>
+              <div className="min-w-0 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Data</label>
+                <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} className="w-full sm:w-auto border border-gray-300 rounded-md text-sm py-2 px-3" />
+              </div>
+              <div className="min-w-0 w-full sm:flex-1">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Motivo (ex.: reforço para evento)</label>
+                <input required value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
+              </div>
+              <button type="submit" disabled={criando} className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-gray-700 hover:bg-gray-800 disabled:opacity-50">
+                <Plus className="-ml-1 mr-2 h-4 w-4" /> Sugerir e cadastrar
+              </button>
+            </form>
+          </details>
+        </div>
       )}
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Data</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Função</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Motivo</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Sugerido</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Escalado</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {doUbm.map((e) => {
-              const sugerido = militares.find((m) => m.id === e.militarSugeridoId);
-              const candidatos = militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(e.funcao));
+      {vagasAbertas.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+            <HandHeart className="w-4 h-4 text-emerald-600" /> Vagas aguardando voluntário
+          </h3>
+          <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+            {vagasAbertas.map((v) => {
+              const prazoVencido = v.prazo < hoje;
+              const jaVoluntariado = !!meuMilitarId && v.voluntariosIds.includes(meuMilitarId);
+              const souElegivel = !!meuMilitarId && v.candidatosElegiveisIds.includes(meuMilitarId) && !jaVoluntariado;
+              const faltam = v.quantidade - v.voluntariosIds.length;
+              const listaPrevia = ordenarCandidatosExtraordinario({
+                ubmId: v.ubmId,
+                funcao: v.funcao,
+                data: v.data,
+                militares,
+                afastamentos,
+                escalasOrdinarias,
+                extraordinariasAnteriores: escalasExtraordinarias,
+              })
+                .filter((m) => v.candidatosElegiveisIds.includes(m.id) && !v.voluntariosIds.includes(m.id))
+                .slice(0, faltam);
               return (
-                <tr key={e.id}>
-                  <td className="px-4 py-2">{e.data}</td>
-                  <td className="px-4 py-2">{FUNCAO_LABELS[e.funcao]}</td>
-                  <td className="px-4 py-2">{e.motivo}</td>
-                  <td className="px-4 py-2 text-gray-500">{sugerido?.nome ?? '—'}</td>
-                  <td className="px-4 py-2">
-                    {isEscalante ? (
-                      <select value={e.militarId} onChange={(ev) => alterarMilitarExtraordinaria(e.id, ev.target.value)} className="border border-gray-200 rounded text-sm">
-                        {candidatos.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
-                      </select>
-                    ) : (
-                      militares.find((m) => m.id === e.militarId)?.nome ?? '—'
+                <div key={v.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-gray-900">
+                      {v.data} — {nomeDaFuncao(v.funcao)} <span className="text-xs text-gray-400 font-normal">({v.voluntariosIds.length}/{v.quantidade} preenchida{v.quantidade > 1 ? 's' : ''})</span>
+                    </div>
+                    <div className="text-gray-500">{v.motivo}</div>
+                    {v.voluntariosIds.length > 0 && (
+                      <div className="text-xs text-emerald-700 mt-0.5">Voluntários: {v.voluntariosIds.map((id) => nomeMilitar(id)).join(', ')}</div>
                     )}
-                    {e.militarId !== e.militarSugeridoId && (
-                      <span className="ml-2 text-[10px] uppercase text-amber-600 font-semibold">alterado</span>
+                    {faltam > 0 && (
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        Lista prévia se ninguém mais se voluntariar: {listaPrevia.length > 0 ? listaPrevia.map((m) => m.nome).join(', ') : '—'}
+                      </div>
                     )}
-                  </td>
-                </tr>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      Prazo pra voluntariar: {v.prazo}{prazoVencido && <span className="text-amber-600 font-medium"> · esgotado</span>}
+                    </div>
+                  </div>
+                  <div className="shrink-0 self-end sm:self-auto">
+                    {souElegivel && !prazoVencido && (
+                      <button
+                        onClick={() => handleVoluntariar(v.id)}
+                        disabled={processandoVagaId === v.id}
+                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        <HandHeart className="-ml-1 mr-1.5 h-3.5 w-3.5" /> Quero me voluntariar
+                      </button>
+                    )}
+                    {isEscalante && prazoVencido && (
+                      <button
+                        onClick={() => handleResolverCompulsorio(v.id)}
+                        disabled={processandoVagaId === v.id}
+                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        Prazo esgotado — completar compulsoriamente
+                      </button>
+                    )}
+                    {jaVoluntariado && <span className="text-xs text-emerald-700 font-medium">Você já se voluntariou</span>}
+                    {!souElegivel && !jaVoluntariado && !isEscalante && (
+                      <span className="text-xs text-gray-400">Aguardando voluntário</span>
+                    )}
+                  </div>
+                </div>
               );
             })}
-            {doUbm.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Nenhuma escala extraordinária cadastrada.</td></tr>}
-          </tbody>
-        </table>
+          </div>
+        </div>
+      )}
+
+      {isEscalante && vagasResolvidas.length > 0 && (
+        <details className="bg-white rounded-lg border border-gray-200">
+          <summary className="px-4 py-3 text-sm font-semibold text-gray-700 cursor-pointer">Histórico de vagas voluntárias resolvidas</summary>
+          <div className="divide-y divide-gray-100 border-t border-gray-100">
+            {vagasResolvidas.map((v) => (
+              <div key={v.id} className="flex flex-col sm:flex-row sm:items-center gap-1 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-gray-900">{v.data} — {nomeDaFuncao(v.funcao)}</div>
+                  <div className="text-gray-500">
+                    {STATUS_VAGA_VOLUNTARIA_LABELS[v.status]}
+                    {v.voluntariosIds.length > 0 && ` · Voluntário(s): ${v.voluntariosIds.map((id) => nomeMilitar(id)).join(', ')}`}
+                    {(v.militaresCompulsoriosIds?.length ?? 0) > 0 && ` · Compulsório(s): ${v.militaresCompulsoriosIds!.map((id) => nomeMilitar(id)).join(', ')}`}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+        {doUbm.length === 0 ? (
+          <p className="px-4 py-8 text-center text-gray-400">Nenhuma escala extraordinária cadastrada.</p>
+        ) : (
+          doUbm.map((e) => {
+            const sugerido = militares.find((m) => m.id === e.militarSugeridoId);
+            const candidatos = militares.filter((m) => m.ubmId === ubmId && m.ativo && m.funcoes.includes(e.funcao));
+            const travada = estaTravada(e.data);
+
+            const handleAlterar = async (novoMilitarId: string) => {
+              try {
+                await alterarMilitarExtraordinaria(e.id, novoMilitarId);
+              } catch (erro) {
+                alert(erro instanceof Error ? erro.message : 'Não foi possível alterar o militar escalado.');
+              }
+            };
+
+            const handleRemover = async () => {
+              if (!confirm('Remover essa escala extraordinária? Essa ação não pode ser desfeita.')) return;
+              try {
+                await deleteEscalaExtraordinaria(e.id);
+              } catch (erro) {
+                alert(erro instanceof Error ? erro.message : 'Não foi possível remover essa escala.');
+              }
+            };
+
+            return (
+              <div key={e.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-gray-900">{e.data} — {nomeDaFuncao(e.funcao)}</div>
+                  <div className="text-gray-500">{e.motivo}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">Sugerido: {sugerido?.nome ?? '—'}</div>
+                </div>
+                <div className="shrink-0 flex items-center gap-2">
+                  {isEscalante && !travada ? (
+                    <select value={e.militarId} onChange={(ev) => handleAlterar(ev.target.value)} className="border border-gray-200 rounded text-sm max-w-full">
+                      {candidatos.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.nome} ({extraordinariasNoMes(m.id, e.data, escalasExtraordinarias)}/{LIMITE_EXTRAORDINARIAS_POR_MES} no mês)
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="inline-flex items-center gap-1">
+                      {militares.find((m) => m.id === e.militarId)?.nome ?? '—'}
+                      {travada && <span title="Semana fechada"><Lock className="w-3 h-3 text-gray-400" /></span>}
+                    </span>
+                  )}
+                  {e.militarId !== e.militarSugeridoId && (
+                    <span className="text-[10px] uppercase text-amber-600 font-semibold">alterado</span>
+                  )}
+                  {isEscalante && !travada && (
+                    <button onClick={handleRemover} title="Remover" className="p-1 -m-1 text-gray-300 hover:text-red-600">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -274,118 +823,145 @@ function AbaDiferenciada({ ubmId }: { ubmId: string }) {
   const {
     usuarioAtual,
     militares,
+    funcoes,
     escalasDiferenciadas,
-    solicitacoesAlteracaoDiferenciada,
-    solicitarEscalaDiferenciada,
+    criarEscalaDiferenciada,
+    atualizarEscalaDiferenciada,
     removerEscalaDiferenciada,
-    solicitarAlteracaoDiferenciada,
-    responderAlteracaoDiferenciada,
   } = useApp();
 
   const isEscalante = temPapel(usuarioAtual, 'escalante');
   const isComandante = temPapel(usuarioAtual, 'comandante');
-  const meuMilitarId = usuarioAtual?.militarId;
+  const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
+  const militaresDaUbm = militares.filter((m) => m.ubmId === ubmId && m.ativo);
 
-  const [novaData, setNovaData] = useState(formatarDataISO(new Date()));
-  const [observacao, setObservacao] = useState('');
-  const [motivoAlteracao, setMotivoAlteracao] = useState<Record<string, string>>({});
+  const [form, setForm] = useState({ militarId: '', funcao: '', data: formatarDataISO(new Date()), observacao: '' });
+  const [criando, setCriando] = useState(false);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [edicao, setEdicao] = useState({ militarId: '', funcao: '', data: '', observacao: '' });
+
+  useEffect(() => {
+    if (!form.funcao && funcoesDaUbm.length > 0) setForm((f) => ({ ...f, funcao: funcoesDaUbm[0].id }));
+  }, [form.funcao, funcoesDaUbm]);
 
   const doUbm = escalasDiferenciadas.filter((e) => e.ubmId === ubmId).sort((a, b) => a.data.localeCompare(b.data));
-  const pendentes = solicitacoesAlteracaoDiferenciada.filter((s) => s.ubmId === ubmId && s.status === 'pendente');
+  const nomeDaFuncao = (id: string) => funcoes.find((f) => f.id === id)?.nome ?? 'Função removida';
 
-  const handleSolicitar = async (e: FormEvent) => {
+  const handleCriar = async (e: FormEvent) => {
     e.preventDefault();
-    if (!meuMilitarId) return;
-    await solicitarEscalaDiferenciada({ militarId: meuMilitarId, ubmId, data: novaData, observacao });
-    setObservacao('');
+    if (!form.militarId || !form.funcao) return;
+    setCriando(true);
+    try {
+      await criarEscalaDiferenciada({ ...form, ubmId });
+      setForm({ militarId: '', funcao: funcoesDaUbm[0]?.id ?? '', data: formatarDataISO(new Date()), observacao: '' });
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível cadastrar a escala diferenciada.');
+    } finally {
+      setCriando(false);
+    }
+  };
+
+  const iniciarEdicao = (id: string) => {
+    const atual = doUbm.find((e) => e.id === id);
+    if (!atual) return;
+    setEditandoId(id);
+    setEdicao({ militarId: atual.militarId, funcao: atual.funcao, data: atual.data, observacao: atual.observacao ?? '' });
+  };
+
+  const salvarEdicao = async () => {
+    if (!editandoId) return;
+    try {
+      await atualizarEscalaDiferenciada(editandoId, edicao);
+      setEditandoId(null);
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível salvar a alteração.');
+    }
   };
 
   return (
     <div className="space-y-6">
-      {meuMilitarId && (
-        <form onSubmit={handleSolicitar} className="bg-white p-4 rounded-lg border border-gray-200 flex flex-wrap gap-3 items-end">
-          <div>
+      <p className="text-sm text-gray-500 bg-white border border-gray-200 rounded-lg p-4">
+        Pra militares que só podem servir em dias específicos. Ao cadastrar, o dia já entra na escala ordinária normal
+        (Kanban, PDF e contagem de equidade) — depois de cadastrado, só o Comandante da UBM pode alterar ou remover.
+      </p>
+
+      {isEscalante && (
+        <form onSubmit={handleCriar} className="bg-white p-4 rounded-lg border border-gray-200 grid grid-cols-1 sm:flex sm:flex-wrap gap-3 sm:items-end">
+          <div className="min-w-0">
+            <label className="block text-xs font-medium text-gray-500 mb-1">Militar</label>
+            <select value={form.militarId} onChange={(e) => setForm({ ...form, militarId: e.target.value })} className="w-full sm:w-auto max-w-full border border-gray-300 rounded-md text-sm py-2 px-3">
+              <option value="">Selecione</option>
+              {militaresDaUbm.map((m) => <option key={m.id} value={m.id}>{m.posto} {m.nome}</option>)}
+            </select>
+          </div>
+          <div className="min-w-0">
+            <label className="block text-xs font-medium text-gray-500 mb-1">Função</label>
+            <select value={form.funcao} onChange={(e) => setForm({ ...form, funcao: e.target.value })} className="w-full sm:w-auto max-w-full border border-gray-300 rounded-md text-sm py-2 px-3">
+              {funcoesDaUbm.length === 0 && <option value="">Nenhuma função cadastrada</option>}
+              {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+            </select>
+          </div>
+          <div className="min-w-0">
             <label className="block text-xs font-medium text-gray-500 mb-1">Data</label>
-            <input type="date" value={novaData} onChange={(e) => setNovaData(e.target.value)} className="border border-gray-300 rounded-md text-sm py-2 px-3" />
+            <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} className="w-full sm:w-auto border border-gray-300 rounded-md text-sm py-2 px-3" />
           </div>
-          <div className="flex-1 min-w-[200px]">
+          <div className="min-w-0 sm:flex-1 sm:min-w-[200px]">
             <label className="block text-xs font-medium text-gray-500 mb-1">Observação (opcional)</label>
-            <input value={observacao} onChange={(e) => setObservacao(e.target.value)} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
+            <input value={form.observacao} onChange={(e) => setForm({ ...form, observacao: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
           </div>
-          <button type="submit" className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800">
-            <CalendarDays className="-ml-1 mr-2 h-4 w-4" /> Indicar dia diferenciado
+          <button type="submit" disabled={criando || !form.militarId || !form.funcao} className="inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50">
+            <CalendarDays className="-ml-1 mr-2 h-4 w-4" /> Cadastrar dia diferenciado
           </button>
         </form>
       )}
 
-      {isComandante && pendentes.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-amber-900">Alterações de escala diferenciada aguardando sua autorização</h3>
-          {pendentes.map((s) => {
-            const militar = militares.find((m) => m.id === s.militarId);
-            return (
-              <div key={s.id} className="flex items-center justify-between bg-white rounded-md p-3 border border-amber-100">
-                <div className="text-sm">
-                  <p className="font-medium text-gray-900">{militar?.nome ?? 'Militar'}</p>
-                  <p className="text-gray-500">Motivo: {s.motivo}</p>
+      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+        {doUbm.length === 0 ? (
+          <p className="px-4 py-8 text-center text-gray-400">Nenhuma escala diferenciada registrada.</p>
+        ) : (
+          doUbm.map((e) => {
+            const militar = militares.find((m) => m.id === e.militarId);
+            const emEdicao = editandoId === e.id;
+
+            if (emEdicao) {
+              return (
+                <div key={e.id} className="grid grid-cols-1 sm:flex sm:flex-wrap gap-2 sm:items-center px-4 py-3 text-sm">
+                  <input type="date" value={edicao.data} onChange={(ev) => setEdicao({ ...edicao, data: ev.target.value })} className="border border-gray-300 rounded text-xs py-1.5 px-2" />
+                  <select value={edicao.militarId} onChange={(ev) => setEdicao({ ...edicao, militarId: ev.target.value })} className="border border-gray-300 rounded text-xs py-1.5 px-2 max-w-full">
+                    {militaresDaUbm.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
+                  </select>
+                  <select value={edicao.funcao} onChange={(ev) => setEdicao({ ...edicao, funcao: ev.target.value })} className="border border-gray-300 rounded text-xs py-1.5 px-2 max-w-full">
+                    {funcoesDaUbm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                  </select>
+                  <input value={edicao.observacao} onChange={(ev) => setEdicao({ ...edicao, observacao: ev.target.value })} placeholder="Observação" className="border border-gray-300 rounded text-xs py-1.5 px-2 sm:flex-1 sm:min-w-[140px]" />
+                  <div className="flex gap-3 justify-end">
+                    <button onClick={salvarEdicao} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium">Salvar</button>
+                    <button onClick={() => setEditandoId(null)} className="text-xs text-gray-500 hover:text-gray-700">Cancelar</button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => responderAlteracaoDiferenciada(s.id, true)} className="px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Autorizar</button>
-                  <button onClick={() => responderAlteracaoDiferenciada(s.id, false)} className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300">Negar</button>
+              );
+            }
+
+            return (
+              <div key={e.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-gray-900">{e.data} — {militar?.nome ?? '—'}</div>
+                  <div className="text-gray-500">{nomeDaFuncao(e.funcao)}{e.observacao ? ` · ${e.observacao}` : ''}</div>
+                </div>
+                <div className="shrink-0">
+                  {isComandante ? (
+                    <div className="flex gap-3">
+                      <button onClick={() => iniciarEdicao(e.id)} className="text-xs text-red-600 hover:text-red-800">Editar</button>
+                      <button onClick={() => removerEscalaDiferenciada(e.id)} className="text-xs text-gray-500 hover:text-red-700">Remover</button>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-400">Só o Comandante altera</span>
+                  )}
                 </div>
               </div>
             );
-          })}
-        </div>
-      )}
-
-      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Data</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Militar</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Observação</th>
-              <th className="relative px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {doUbm.map((e) => {
-              const militar = militares.find((m) => m.id === e.militarId);
-              const jaTemPendencia = solicitacoesAlteracaoDiferenciada.some((s) => s.escalaDiferenciadaId === e.id && s.status === 'pendente');
-              return (
-                <tr key={e.id}>
-                  <td className="px-4 py-2">{e.data}</td>
-                  <td className="px-4 py-2">{militar?.nome ?? '—'}</td>
-                  <td className="px-4 py-2">{e.observacao || '—'}</td>
-                  <td className="px-4 py-2 text-right">
-                    {e.militarId === meuMilitarId ? (
-                      <button onClick={() => removerEscalaDiferenciada(e.id)} className="text-xs text-red-600 hover:text-red-800">Remover</button>
-                    ) : isEscalante && !jaTemPendencia ? (
-                      <div className="flex gap-2 items-center justify-end">
-                        <input
-                          placeholder="Motivo da alteração"
-                          value={motivoAlteracao[e.id] ?? ''}
-                          onChange={(ev) => setMotivoAlteracao({ ...motivoAlteracao, [e.id]: ev.target.value })}
-                          className="border border-gray-200 rounded text-xs px-2 py-1"
-                        />
-                        <button
-                          onClick={() => solicitarAlteracaoDiferenciada({ escalaDiferenciadaId: e.id, motivo: motivoAlteracao[e.id] ?? '' })}
-                          className="text-xs text-amber-700 hover:text-amber-900 font-medium"
-                        >
-                          Solicitar alteração
-                        </button>
-                      </div>
-                    ) : jaTemPendencia ? (
-                      <span className="text-xs text-amber-600">Alteração pendente</span>
-                    ) : null}
-                  </td>
-                </tr>
-              );
-            })}
-            {doUbm.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Nenhuma escala diferenciada registrada.</td></tr>}
-          </tbody>
-        </table>
+          })
+        )}
       </div>
     </div>
   );

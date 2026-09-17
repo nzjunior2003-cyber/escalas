@@ -7,8 +7,11 @@ rules_version = '2';
 //
 // Modelo: todo usuário autenticado e ATIVO enxerga os dados operacionais da
 // própria UBM; a coleção `usuarios` (aprovação de acesso e mudança de
-// papéis) é restrita a quem tem o papel 'comandante' ou 'escalante', com uma
-// exceção controlada para autocadastro.
+// papéis) é restrita a quem tem o papel 'comandante' ou 'escalante' — e só
+// dentro da própria UBM —, com uma exceção controlada para autocadastro.
+// Os papéis 'master', 'comandante' e 'escalante' só podem ser atribuídos ou
+// removidos pelo master: Comandante/Escalante de uma UBM podem mudar, e é o
+// master quem decide isso, junto com o cadastro das próprias UBMs.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -30,25 +33,55 @@ service cloud.firestore {
       return ativo() && (papel in perfilDoc().papeis);
     }
 
-    function gestao() {
-      return temPapel('comandante') || temPapel('escalante');
+    function master() {
+      return temPapel('master');
+    }
+
+    // Comandante ou Escalante ATIVO da UBM informada (não de qualquer UBM).
+    function gestaoDaUbm(ubmId) {
+      return (temPapel('comandante') || temPapel('escalante')) && perfilDoc().ubmId == ubmId;
+    }
+
+    function papeisRestritos(papeis) {
+      return papeis.hasAny(['master', 'comandante', 'escalante']);
+    }
+
+    // Master gerencia qualquer UBM; Comandante/Escalante só a própria.
+    function podeGerenciarUbm(ubmId) {
+      return master() || gestaoDaUbm(ubmId);
     }
 
     match /usuarios/{usuarioId} {
       allow read: if autenticado();
 
       // Autocadastro ("Solicitar acesso"): só o próprio UID, sempre inativo,
-      // sem papéis de comandante/escalante e sem senha no documento.
+      // sempre como 'militar' e sem senha no documento.
       allow create: if autenticado()
         && request.auth.uid == usuarioId
         && request.resource.data.ativo == false
-        && !('comandante' in request.resource.data.papeis)
-        && !('escalante' in request.resource.data.papeis)
+        && request.resource.data.papeis == ['militar']
         && !('senha' in request.resource.data);
 
-      // Comandante/Escalante cria, aprova, muda papéis e remove.
-      allow create, update: if gestao() && !('senha' in request.resource.data);
-      allow delete: if gestao();
+      // Master: controle total (é quem define/remove master/comandante/escalante).
+      // `delete` fica numa cláusula separada porque, numa exclusão,
+      // `request.resource` é nulo — testar `request.resource.data` aqui
+      // travava em erro de avaliação e negava a exclusão sempre, mesmo pro
+      // master (só funcionava quando ele também era Comandante/Escalante
+      // daquela UBM específica, via `gestaoDaUbm` abaixo).
+      allow create, update: if master() && !('senha' in request.resource.data);
+      allow delete: if master();
+
+      // Comandante/Escalante: só dentro da própria UBM, e nunca atribuindo
+      // (nem removendo de quem já tem) papel de master/comandante/escalante —
+      // isso é decisão exclusiva do master.
+      allow create: if gestaoDaUbm(request.resource.data.ubmId)
+        && !('senha' in request.resource.data)
+        && !papeisRestritos(request.resource.data.papeis);
+      allow update: if gestaoDaUbm(resource.data.ubmId)
+        && !papeisRestritos(resource.data.papeis)
+        && !papeisRestritos(request.resource.data.papeis)
+        && !('senha' in request.resource.data);
+      allow delete: if gestaoDaUbm(resource.data.ubmId) && !papeisRestritos(resource.data.papeis);
 
       // O próprio usuário pode ajustar dados de contato, nunca papéis/ativo.
       allow update: if autenticado()
@@ -56,60 +89,207 @@ service cloud.firestore {
         && request.resource.data.papeis == resource.data.papeis
         && request.resource.data.ativo == resource.data.ativo
         && !('senha' in request.resource.data);
+
+      // Primeiro acesso auto-vinculado: se já existe um `Militar` com a
+      // MESMA matrícula dentro da MESMA UBM (o escalante já cadastrou essa
+      // pessoa no Efetivo antes dela pedir acesso), a própria conta recém-
+      // criada pode se auto-ativar e se vincular a esse Militar — a
+      // existência do registro já é a verificação, sem depender de
+      // aprovação manual (ver `primeiroAcessoPorMatricula`).
+      allow update: if autenticado()
+        && request.auth.uid == usuarioId
+        && resource.data.ativo == false
+        && request.resource.data.papeis == resource.data.papeis
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ativo', 'militarId'])
+        && request.resource.data.ativo == true
+        && exists(/databases/$(database)/documents/militares/$(request.resource.data.militarId))
+        && get(/databases/$(database)/documents/militares/$(request.resource.data.militarId)).data.ubmId == resource.data.ubmId
+        && get(/databases/$(database)/documents/militares/$(request.resource.data.militarId)).data.matricula == resource.data.matricula;
     }
 
+    // Índice público mínimo matrícula -> e-mail, para permitir login por
+    // matrícula (a coleção `usuarios` continua exigindo autenticação para
+    // leitura — expor só isso evita vazar nome/papéis/UBM de todo o efetivo).
+    // "Primeiro a registrar" (create) e imutável depois (sem update/delete):
+    // só quem está autenticado com aquele e-mail pode reivindicar a
+    // matrícula — nem o próprio usuário nem um admin conseguem sobrescrever
+    // uma matrícula já vinculada a outra conta.
+    match /matriculas/{matricula} {
+      allow read: if true;
+      allow create: if autenticado()
+        && request.auth.token.email == request.resource.data.email
+        && request.resource.data.keys().hasOnly(['email']);
+      allow update, delete: if false;
+    }
+
+    // UBMs são cadastradas pelo master — Comandante/Escalante não criam
+    // nem removem UBMs, só operam dentro da que já pertencem. Leitura
+    // pública (sem exigir autenticação): a tela de "Solicitar Acesso"
+    // precisa listar as UBMs para quem ainda nem tem conta; sigla/nome não
+    // são dados sensíveis.
     match /ubms/{documento} {
+      allow read: if true;
+      allow create, delete: if master();
+      // Comandante OU Escalante da própria UBM podem atualizar os dados
+      // institucionais (brasão, endereço, contato) e confirmar
+      // `efetivoCompleto` — nunca criar ou excluir uma UBM.
+      allow update: if master()
+        || (gestaoDaUbm(documento)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['nome', 'sigla', 'logoDataUrl', 'endereco', 'cep', 'bairro', 'cidade', 'email', 'telefone', 'efetivoCompleto']));
+    }
+    // Comandos (CRB/COP) são cadastrados pelo master. As UBMs vinculadas a
+    // cada um também podem ser ajustadas pelo próprio Comandante/Escalante
+    // da UBM (ver Ubms/index.tsx) — mas só o PRÓPRIO id dentro de `ubmIds`,
+    // nunca o de outra UBM nem qualquer outro campo do comando.
+    function podeVincularUbmAoComando() {
+      return (temPapel('comandante') || temPapel('escalante'))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ubmIds'])
+        && request.resource.data.ubmIds.toSet().difference(resource.data.ubmIds.toSet()).hasOnly([perfilDoc().ubmId])
+        && resource.data.ubmIds.toSet().difference(request.resource.data.ubmIds.toSet()).hasOnly([perfilDoc().ubmId]);
+    }
+    match /comandos/{documento} {
       allow read: if ativo();
-      allow write: if gestao();
+      allow create, delete: if master();
+      allow update: if master() || podeVincularUbmAoComando();
     }
     match /militares/{documento} {
+      // Além de qualquer usuário ativo, uma conta recém-criada (ainda
+      // inativa) pode ler SÓ o próprio registro de Militar — mesma
+      // matrícula da própria `usuarios/{uid}` — pra checar no primeiro
+      // acesso se o escalante já a incluiu no Efetivo (ver
+      // `primeiroAcessoPorMatricula`); nunca dá pra ler o efetivo alheio.
+      allow read: if ativo()
+        || (autenticado() && resource.data.matricula == perfilDoc().matricula);
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
+    }
+    // Funções operacionais cadastradas por UBM (ver nota em types.ts) —
+    // cada Comandante/Escalante só cria/edita/apaga as da própria unidade.
+    match /funcoes/{documento} {
       allow read: if ativo();
-      allow write: if gestao();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
     match /escalas_ordinarias/{documento} {
       allow read: if ativo();
-      allow write: if gestao();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
     match /escalas_extraordinarias/{documento} {
       allow read: if ativo();
-      allow write: if gestao();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId)
+        // Voluntariado (ver nota em types.ts): o próprio militar cria o
+        // registro definitivo pra si mesmo, só quando já consta como
+        // voluntário na vaga referenciada (a atualização da vaga acontece
+        // sempre ANTES dessa criação — ver dispararVagaVoluntariaExtraordinaria).
+        || (
+          ativo()
+          && 'vagaVoluntariaId' in request.resource.data
+          && request.resource.data.militarId == perfilDoc().militarId
+          && get(/databases/$(database)/documents/vagas_voluntarias_extraordinarias/$(request.resource.data.vagaVoluntariaId)).data.voluntariosIds.hasAny([perfilDoc().militarId])
+          && get(/databases/$(database)/documents/vagas_voluntarias_extraordinarias/$(request.resource.data.vagaVoluntariaId)).data.ubmId == request.resource.data.ubmId
+        );
+      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
+    // Vaga voluntária de extraordinária (ver nota em types.ts): o escalante
+    // dispara (podendo pedir mais de um militar, campo `quantidade`);
+    // qualquer elegível ativo pode se acrescentar a `voluntariosIds` enquanto
+    // ainda houver posição sobrando, mas só a si mesmo (nunca indicando
+    // outro militar) e sem tocar nos demais campos — o tamanho do array só
+    // pode crescer em 1 por vez e nunca passar de `quantidade`, o que evita
+    // dois voluntários simultâneos estourarem a vaga.
+    match /vagas_voluntarias_extraordinarias/{documento} {
+      allow read: if ativo();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update: if podeGerenciarUbm(resource.data.ubmId)
+        || (
+          ativo()
+          && resource.data.status == 'aberta'
+          && resource.data.voluntariosIds.size() < resource.data.quantidade
+          && resource.data.candidatosElegiveisIds.hasAny([perfilDoc().militarId])
+          && request.resource.data.status in ['aberta', 'preenchida']
+          && request.resource.data.voluntariosIds.size() == resource.data.voluntariosIds.size() + 1
+          && request.resource.data.voluntariosIds.size() <= resource.data.quantidade
+          && request.resource.data.voluntariosIds.hasAll(resource.data.voluntariosIds)
+          && request.resource.data.voluntariosIds.hasAny([perfilDoc().militarId])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'voluntariosIds'])
+        );
+      allow delete: if master();
+    }
+    // Escala diferenciada (ver nota em types.ts): o escalante cadastra; só o
+    // Comandante da UBM altera ou remove depois de cadastrada.
     match /escalas_diferenciadas/{documento} {
       allow read: if ativo();
-      // Qualquer militar ativo pode indicar/remover sua própria escala
-      // diferenciada; a alteração pelo escalante passa por
-      // solicitacoes_alteracao_diferenciada (nunca escreve aqui direto,
-      // exceto para aplicar uma alteração já aprovada, via delete).
-      allow write: if ativo();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if master() || (temPapel('comandante') && perfilDoc().ubmId == resource.data.ubmId);
     }
-    match /solicitacoes_alteracao_diferenciada/{documento} {
+    // Fechamento/Histórico de escala (ver nota em types.ts): só quem
+    // gerencia a UBM fecha, reabre ou grava uma versão no histórico.
+    match /fechamentos_escala/{documento} {
       allow read: if ativo();
-      allow create: if temPapel('escalante');
-      allow update: if temPapel('comandante');
+      allow write: if podeGerenciarUbm(request.resource.data.ubmId);
+    }
+    match /historico_escalas/{documento} {
+      allow read: if ativo();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if false;
     }
     match /afastamentos/{documento} {
       allow read: if ativo();
-      allow write: if gestao();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
     match /presencas/{documento} {
       allow read: if ativo();
       allow write: if ativo();
     }
+    // Autorização de Substituição / Permuta (ver nota em types.ts): só o
+    // próprio solicitante cria; só o indicado responde enquanto pendente com
+    // ele; a aprovação final (Comandante OU Escalante da UBM) é a única
+    // etapa que pode mudar o status depois disso.
     match /solicitacoes_servico/{documento} {
       allow read: if ativo();
-      allow write: if ativo();
+      allow create: if ativo() && request.resource.data.solicitanteId == request.auth.uid;
+      allow update: if ativo() && (
+        (resource.data.indicadoId == request.auth.uid && resource.data.status == 'aguardando_indicado') ||
+        podeGerenciarUbm(resource.data.ubmId)
+      );
+    }
+    // Solicitação de Reforço (CRB/COP -> UBM, ver nota em types.ts): só
+    // quem tem o papel 'crb'/'cop' no comando de origem cria, e só pra uma
+    // UBM de fato vinculada àquele comando; só quem gerencia a UBM alvo
+    // (Comandante/Escalante/master) atende ou recusa.
+    match /solicitacoes_reforco/{documento} {
+      allow read: if ativo();
+      allow create: if ativo()
+        && (temPapel('crb') || temPapel('cop'))
+        && perfilDoc().comandoId == request.resource.data.comandoId
+        && get(/databases/$(database)/documents/comandos/$(request.resource.data.comandoId)).data.ubmIds.hasAny([request.resource.data.ubmId]);
+      allow update: if podeGerenciarUbm(resource.data.ubmId);
+    }
+    // Escala do Comando (ver nota em types.ts): ledger de reforços recebidos
+    // pelo CRB/COP, gravado só quando a UBM cedente atende a solicitação —
+    // é por isso que o comando só vê o militar a partir daqui, nunca antes.
+    // Só quem gerencia a UBM de origem grava (é ela quem decide "atender");
+    // o comando e qualquer usuário ativo só leem.
+    match /escalas_comando/{documento} {
+      allow read: if ativo();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmOrigemId);
+      allow update, delete: if master();
     }
     match /alertas/{documento} {
       allow read: if ativo() && resource.data.usuarioId == request.auth.uid;
       allow create: if ativo();
       allow update: if ativo() && resource.data.usuarioId == request.auth.uid;
+      allow delete: if ativo() && resource.data.usuarioId == request.auth.uid;
     }
 
     // Log de acesso: criação aberta (login mal-sucedido acontece antes de
     // qualquer sessão válida), restrita ao formato mínimo; leitura só para
-    // comandante/escalante.
+    // o master (trilha de auditoria única para o CBMPA).
     match /logs_acesso/{documento} {
-      allow read: if gestao();
+      allow read: if master();
       allow create: if request.resource.data.email is string
         && request.resource.data.sucesso is bool
         && request.resource.data.keys().hasOnly(['userId', 'email', 'sucesso', 'dataHora', 'userAgent']);
