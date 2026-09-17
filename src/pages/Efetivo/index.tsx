@@ -61,6 +61,15 @@ export default function Efetivo() {
   const jaCadastradoNaUbm = (matricula: string) =>
     !!matricula && militaresDaUbm.some((m) => m.matricula === normalizarMatricula(matricula));
 
+  // Adicionar alguém novo invalida a confirmação anterior de "efetivo
+  // completo" — reabre o banner pra reconfirmar, já que quem acabou de
+  // entrar também precisa ser considerado antes de liberar a previsão de novo.
+  const reabrirConfirmacaoEfetivoSeNecessario = async () => {
+    if (ubmAtual?.efetivoCompleto) {
+      await updateUbm(ubmId, { efetivoCompleto: false });
+    }
+  };
+
   const handleInserirDaPlanilha = async () => {
     if (!selecionadoPlanilha) return;
     await addMilitar({
@@ -72,6 +81,7 @@ export default function Efetivo() {
       ativo: true,
       origemCadastro: 'planilha',
     });
+    await reabrirConfirmacaoEfetivoSeNecessario();
     setSelecionadoPlanilha(null);
     setBuscaPlanilhaValor('');
   };
@@ -88,6 +98,7 @@ export default function Efetivo() {
       ativo: true,
       origemCadastro: 'manual',
     });
+    await reabrirConfirmacaoEfetivoSeNecessario();
     setNovoMilitarForm({ nome: '', posto: '', matricula: '' });
     setIsNovoOpen(false);
   };
