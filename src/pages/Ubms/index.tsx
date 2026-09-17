@@ -3,7 +3,7 @@ import type { ChangeEvent, FormEvent } from 'react';
 import { Building2, Plus, Edit2, X, Upload } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { redimensionarImagemParaDataUrl } from '../../lib/imagem';
-import { temPapel, type Ubm } from '../../types';
+import { temPapel, TIPO_COMANDO_LABELS, type Ubm } from '../../types';
 
 /**
  * Cadastro de UBMs — criação/exclusão exclusiva do master. O Comandante e o
@@ -11,7 +11,7 @@ import { temPapel, type Ubm } from '../../types';
  * (brasão, endereço, contato), mas não a sigla/nome nem outras unidades.
  */
 export default function Ubms() {
-  const { usuarioAtual, ubms, usuarios, addUbm, updateUbm } = useApp();
+  const { usuarioAtual, ubms, usuarios, comandos, addUbm, updateUbm, vincularUbmAoComando } = useApp();
   const isMaster = temPapel(usuarioAtual, 'master');
   const isComandante = temPapel(usuarioAtual, 'comandante');
   const isEscalante = temPapel(usuarioAtual, 'escalante');
@@ -30,6 +30,7 @@ export default function Ubms() {
     telefone: '',
   });
   const [salvando, setSalvando] = useState(false);
+  const [salvandoComando, setSalvandoComando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const inputNovoRef = useRef<HTMLInputElement>(null);
   const inputEditarRef = useRef<HTMLInputElement>(null);
@@ -107,6 +108,20 @@ export default function Ubms() {
       setErro(erroEditar instanceof Error ? erroEditar.message : 'Não foi possível salvar as alterações.');
     } finally {
       setSalvando(false);
+    }
+  };
+
+  const comandoDaUbm = (ubmId: string) => comandos.find((c) => c.ubmIds.includes(ubmId));
+
+  const handleMudarComando = async (ubmId: string, novoComandoId: string) => {
+    setSalvandoComando(true);
+    setErro(null);
+    try {
+      await vincularUbmAoComando(ubmId, novoComandoId || null);
+    } catch (erroVinculo) {
+      setErro(erroVinculo instanceof Error ? erroVinculo.message : 'Não foi possível vincular o comando.');
+    } finally {
+      setSalvandoComando(false);
     }
   };
 
@@ -280,6 +295,20 @@ export default function Ubms() {
               {!isMaster && (
                 <p className="text-xs text-gray-400">Sigla e nome só podem ser alterados pelo master.</p>
               )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">CRB/COP ao qual a UBM pertence</label>
+                <select
+                  disabled={salvandoComando}
+                  value={comandoDaUbm(editando.id)?.id ?? ''}
+                  onChange={(e) => handleMudarComando(editando.id, e.target.value)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm disabled:opacity-50"
+                >
+                  <option value="">Nenhum</option>
+                  {comandos.map((c) => (
+                    <option key={c.id} value={c.id}>{c.sigla} — {TIPO_COMANDO_LABELS[c.tipo]}</option>
+                  ))}
+                </select>
+              </div>
               <p className="text-xs font-medium text-gray-500 pt-2 border-t border-gray-100">Endereço (mostrado no rodapé do PDF de escala)</p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Endereço</label>

@@ -135,6 +135,7 @@ interface AppContextData {
   addComando: (dados: Omit<Comando, 'id'>) => Promise<string>;
   updateComando: (id: string, dados: Partial<Comando>) => Promise<void>;
   deleteComando: (id: string) => Promise<void>;
+  vincularUbmAoComando: (ubmId: string, novoComandoId: string | null) => Promise<void>;
 
   updateUsuario: (id: string, dados: Partial<Usuario>) => Promise<void>;
   addUsuario: (dados: Omit<Usuario, 'id' | 'criado_em'> & { senha: string }) => Promise<void>;
@@ -704,6 +705,35 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const db = requireDb();
     await deleteDoc(doc(db, 'comandos', id));
   }, []);
+
+  /**
+   * Vincula a própria UBM a um CRB/COP (ou desvincula, passando `null`) —
+   * usado pelo Comandante/Escalante na tela de UBMs, sem precisar do módulo
+   * Comandos (exclusivo do master). Só mexe no array `ubmIds` de cada
+   * comando afetado, um de cada vez, tirando do antigo (se houver) e
+   * pondo no novo — a regra do Firestore só permite mexer no próprio id
+   * dentro desse array, nunca no de outra UBM.
+   */
+  const vincularUbmAoComando = useCallback(
+    async (ubmId: string, novoComandoId: string | null) => {
+      const db = requireDb();
+      const lote = writeBatch(db);
+      let algumaMudanca = false;
+      comandos.forEach((c) => {
+        const temAgora = c.ubmIds.includes(ubmId);
+        const deveTer = c.id === novoComandoId;
+        if (temAgora && !deveTer) {
+          lote.update(doc(db, 'comandos', c.id), { ubmIds: c.ubmIds.filter((id) => id !== ubmId) });
+          algumaMudanca = true;
+        } else if (!temAgora && deveTer) {
+          lote.update(doc(db, 'comandos', c.id), { ubmIds: [...c.ubmIds, ubmId] });
+          algumaMudanca = true;
+        }
+      });
+      if (algumaMudanca) await lote.commit();
+    },
+    [comandos],
+  );
 
   // --- Funções operacionais (cadastro por UBM) ------------------------------
   const addFuncao = useCallback(
@@ -1629,6 +1659,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       addComando,
       updateComando,
       deleteComando,
+      vincularUbmAoComando,
       updateUsuario,
       addUsuario,
       deleteUsuario,
@@ -1701,6 +1732,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       addComando,
       updateComando,
       deleteComando,
+      vincularUbmAoComando,
       updateUsuario,
       addUsuario,
       deleteUsuario,

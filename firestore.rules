@@ -138,11 +138,20 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['nome', 'sigla', 'logoDataUrl', 'endereco', 'cep', 'bairro', 'cidade', 'email', 'telefone', 'efetivoCompleto']));
     }
-    // Comandos (CRB/COP) são cadastrados pelo master, junto com quais UBMs
-    // ficam vinculadas a cada um (ver nota em types.ts).
+    // Comandos (CRB/COP) são cadastrados pelo master. As UBMs vinculadas a
+    // cada um também podem ser ajustadas pelo próprio Comandante/Escalante
+    // da UBM (ver Ubms/index.tsx) — mas só o PRÓPRIO id dentro de `ubmIds`,
+    // nunca o de outra UBM nem qualquer outro campo do comando.
+    function podeVincularUbmAoComando() {
+      return (temPapel('comandante') || temPapel('escalante'))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ubmIds'])
+        && request.resource.data.ubmIds.toSet().difference(resource.data.ubmIds.toSet()).hasOnly([perfilDoc().ubmId])
+        && resource.data.ubmIds.toSet().difference(request.resource.data.ubmIds.toSet()).hasOnly([perfilDoc().ubmId]);
+    }
     match /comandos/{documento} {
       allow read: if ativo();
-      allow write: if master();
+      allow create, delete: if master();
+      allow update: if master() || podeVincularUbmAoComando();
     }
     match /militares/{documento} {
       // Além de qualquer usuário ativo, uma conta recém-criada (ainda
