@@ -791,7 +791,7 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
                     <select value={e.militarId} onChange={(ev) => handleAlterar(ev.target.value)} className="border border-gray-200 rounded text-sm max-w-full">
                       {candidatos.map((m) => (
                         <option key={m.id} value={m.id}>
-                          {m.nome} ({extraordinariasNoMes(m.id, e.data, escalasExtraordinarias)}/{LIMITE_EXTRAORDINARIAS_POR_MES} no mês)
+                          {m.nome} ({extraordinariasNoMes(m.id, e.data, escalasExtraordinarias, afastamentos)}/{LIMITE_EXTRAORDINARIAS_POR_MES} no mês)
                         </option>
                       ))}
                     </select>

@@ -986,7 +986,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const militarFinal = dados.militarIdEscolhido ?? sugerido.id;
       if (
         dados.militarIdEscolhido &&
-        extraordinariasNoMes(militarFinal, dados.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES
+        extraordinariasNoMes(militarFinal, dados.data, escalasExtraordinarias, afastamentos) >= LIMITE_EXTRAORDINARIAS_POR_MES
       ) {
         throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
       }
@@ -1010,7 +1010,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     async (id: string, militarId: string) => {
       const db = requireDb();
       const atual = escalasExtraordinarias.find((e) => e.id === id);
-      if (atual && extraordinariasNoMes(militarId, atual.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
+      if (atual && extraordinariasNoMes(militarId, atual.data, escalasExtraordinarias, afastamentos) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
         throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
       }
       // O militarSugeridoId nunca é sobrescrito — a estatística de rodízio
@@ -1104,7 +1104,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (!vaga.candidatosElegiveisIds.includes(militarId)) {
         throw new Error('Você não está na lista de elegíveis pra essa vaga.');
       }
-      if (extraordinariasNoMes(militarId, vaga.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
+      if (extraordinariasNoMes(militarId, vaga.data, escalasExtraordinarias, afastamentos) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
         throw new Error(`Você já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
       }
       if (!temFolga24hAntes(militarId, vaga.data, escalasOrdinarias, escalasExtraordinarias)) {
@@ -1276,7 +1276,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (decisao.atender) {
         const militarFinal = decisao.militarId ?? solicitacao.militarSugeridoId;
         if (!militarFinal) throw new Error('Nenhum militar selecionado pra atender essa solicitação.');
-        if (extraordinariasNoMes(militarFinal, solicitacao.data, escalasExtraordinarias) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
+        if (extraordinariasNoMes(militarFinal, solicitacao.data, escalasExtraordinarias, afastamentos) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
           throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
         }
 

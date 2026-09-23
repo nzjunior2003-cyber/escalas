@@ -175,7 +175,7 @@ function PainelComando() {
 }
 
 function PainelUbm() {
-  const { usuarioAtual, comandos, militares, funcoes, escalasExtraordinarias, solicitacoesReforco, responderSolicitacaoReforco } = useApp();
+  const { usuarioAtual, comandos, militares, funcoes, afastamentos, escalasExtraordinarias, solicitacoesReforco, responderSolicitacaoReforco } = useApp();
   const ubmId = usuarioAtual?.ubmId ?? '';
   const [selecaoMilitar, setSelecaoMilitar] = useState<Record<string, string>>({});
   const [processando, setProcessando] = useState<string | null>(null);
@@ -253,7 +253,7 @@ function PainelUbm() {
                     <option value="">Selecione o militar</option>
                     {candidatosDaFuncao.map((m) => (
                       <option key={m.id} value={m.id}>
-                        {m.posto} {m.nome} ({extraordinariasNoMes(m.id, s.data, escalasExtraordinarias)}/{LIMITE_EXTRAORDINARIAS_POR_MES} no mês)
+                        {m.posto} {m.nome} ({extraordinariasNoMes(m.id, s.data, escalasExtraordinarias, afastamentos)}/{LIMITE_EXTRAORDINARIAS_POR_MES} no mês)
                       </option>
                     ))}
                   </select>

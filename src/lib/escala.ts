@@ -241,10 +241,27 @@ export function calcularDiasFolga(
 /** Teto mensal de reforços extraordinários por militar (item 7 do pedido do CBMPA) — protege contra sobrecarga e força a equalização a girar entre mais gente. */
 export const LIMITE_EXTRAORDINARIAS_POR_MES = 12;
 
-/** Quantas extraordinárias (qualquer função) o militar já tem no mesmo mês/ano de `data`. */
-export function extraordinariasNoMes(militarId: string, data: string, extraordinarias: EscalaExtraordinaria[]): number {
+/**
+ * Quantas extraordinárias (qualquer função, da própria UBM) o militar já tem
+ * no mesmo mês/ano de `data`, SOMADAS aos reforços de CRB/COP atendidos
+ * nesse mês (motivo 'reforco_crb_cop' em `Afastamento`) — pro teto mensal
+ * (`LIMITE_EXTRAORDINARIAS_POR_MES`) valer pra sobrecarga real do militar,
+ * não só pro que a própria UBM lançou. `afastamentos` é opcional só pra não
+ * quebrar chamadas antigas que ainda não tinham esse dado à mão; sempre que
+ * disponível, deve ser passado.
+ */
+export function extraordinariasNoMes(
+  militarId: string,
+  data: string,
+  extraordinarias: EscalaExtraordinaria[],
+  afastamentos: Afastamento[] = [],
+): number {
   const mes = data.slice(0, 7); // yyyy-MM
-  return extraordinarias.filter((e) => e.militarId === militarId && e.data.slice(0, 7) === mes).length;
+  const daPropriaUbm = extraordinarias.filter((e) => e.militarId === militarId && e.data.slice(0, 7) === mes).length;
+  const reforcosCrbCop = afastamentos.filter(
+    (a) => a.militarId === militarId && a.motivo === 'reforco_crb_cop' && a.dataInicio.slice(0, 7) === mes,
+  ).length;
+  return daPropriaUbm + reforcosCrbCop;
 }
 
 /**
@@ -327,7 +344,7 @@ export function ordenarCandidatosExtraordinario(params: {
   const { ubmId, funcao, data, afastamentos, escalasOrdinarias, extraordinariasAnteriores } = params;
   const elegiveis = militaresDaFuncao(params.militares, ubmId, funcao)
     .filter((m) => !estaAfastado(m.id, data, afastamentos))
-    .filter((m) => extraordinariasNoMes(m.id, data, extraordinariasAnteriores) < LIMITE_EXTRAORDINARIAS_POR_MES)
+    .filter((m) => extraordinariasNoMes(m.id, data, extraordinariasAnteriores, afastamentos) < LIMITE_EXTRAORDINARIAS_POR_MES)
     .filter((m) => temFolga24hAntes(m.id, data, escalasOrdinarias, extraordinariasAnteriores));
   if (elegiveis.length === 0) return [];
 
