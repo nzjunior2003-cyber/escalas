@@ -440,18 +440,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   /**
-   * Avisa o militar (alerta no sistema + e-mail) sempre que ele entra numa
-   * escala — ordinária ou extraordinária, gerada automaticamente ou
-   * lançada manualmente pelo escalante. Só notifica quem já tem conta
-   * vinculada (`usuarios.militarId`) — um militar cadastrado no Efetivo mas
-   * que ainda não fez o primeiro acesso simplesmente não recebe nada, sem
-   * erro nem bloqueio.
+   * Avisa o militar (alerta no sistema + e-mail) sempre que uma escala dele
+   * muda — entrou (`tipo: 'escalado'`) ou saiu (`tipo: 'removido_da_escala'`,
+   * por troca ou remoção manual) —, ordinária, extraordinária ou
+   * diferenciada, gerada automaticamente ou lançada manualmente pelo
+   * escalante. Só notifica quem já tem conta vinculada
+   * (`usuarios.militarId`) — um militar cadastrado no Efetivo mas que ainda
+   * não fez o primeiro acesso simplesmente não recebe nada, sem erro nem
+   * bloqueio.
    */
   const notificarMilitarEscalado = useCallback(
-    async (militarId: string, mensagemAlerta: string, assuntoEmail: string, htmlEmail: string) => {
+    async (militarId: string, mensagemAlerta: string, assuntoEmail: string, htmlEmail: string, tipo: Alerta['tipo'] = 'escalado') => {
       const usuarioMilitar = usuarios.find((u) => u.militarId === militarId);
       if (!usuarioMilitar) return;
-      await notificar(usuarioMilitar.id, 'escalado', mensagemAlerta, '/sistema/escala');
+      await notificar(usuarioMilitar.id, tipo, mensagemAlerta, '/sistema/escala');
       try {
         await enviarEmail({ to: usuarioMilitar.email, subject: assuntoEmail, html: htmlEmail });
       } catch (erroEnvio) {
@@ -985,8 +987,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const updateEscalaOrdinaria = useCallback(
     async (id: string, militarId: string) => {
       const db = requireDb();
-      await updateDoc(doc(db, 'escalas_ordinarias', id), { militarId, origem: 'manual' });
       const entrada = escalasOrdinarias.find((e) => e.id === id);
+      await updateDoc(doc(db, 'escalas_ordinarias', id), { militarId, origem: 'manual' });
       if (!entrada) return;
       const funcaoNome = funcoes.find((f) => f.id === entrada.funcao)?.nome ?? 'função removida';
       const dataBr = formatarDataBr(entrada.data);
@@ -996,6 +998,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         'Você foi escalado — GESOP',
         `<p>Você foi escalado(a) pra <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
       );
+      if (entrada.militarId !== militarId) {
+        await notificarMilitarEscalado(
+          entrada.militarId,
+          `Você foi removido(a) da escala de ${funcaoNome} em ${dataBr} (substituído).`,
+          'Você foi removido de uma escala — GESOP',
+          `<p>Você foi removido(a) da escala de <b>${funcaoNome}</b> em <b>${dataBr}</b> (substituído).</p>`,
+          'removido_da_escala',
+        );
+      }
     },
     [escalasOrdinarias, funcoes, notificarMilitarEscalado],
   );
@@ -1024,10 +1035,24 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [escalasOrdinarias, funcoes, notificarMilitarEscalado],
   );
 
-  const deleteEscalaOrdinaria = useCallback(async (id: string) => {
-    const db = requireDb();
-    await deleteDoc(doc(db, 'escalas_ordinarias', id));
-  }, []);
+  const deleteEscalaOrdinaria = useCallback(
+    async (id: string) => {
+      const db = requireDb();
+      const entrada = escalasOrdinarias.find((e) => e.id === id);
+      await deleteDoc(doc(db, 'escalas_ordinarias', id));
+      if (!entrada) return;
+      const funcaoNome = funcoes.find((f) => f.id === entrada.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(entrada.data);
+      await notificarMilitarEscalado(
+        entrada.militarId,
+        `Você foi removido(a) da escala de ${funcaoNome} em ${dataBr}.`,
+        'Você foi removido de uma escala — GESOP',
+        `<p>Você foi removido(a) da escala de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+        'removido_da_escala',
+      );
+    },
+    [escalasOrdinarias, funcoes, notificarMilitarEscalado],
+  );
 
   /** Kanban por função: adiciona mais um militar numa função+dia que já tem gente (ou começa vazia) — sem mexer nos cartões que já estavam lá. */
   const adicionarEscalaOrdinaria = useCallback(
@@ -1121,15 +1146,38 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           'Você foi escalado — GESOP',
           `<p>Você foi escalado(a) pra uma extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p><p>Motivo: ${atual.motivo}</p>`,
         );
+        if (atual.militarId !== militarId) {
+          await notificarMilitarEscalado(
+            atual.militarId,
+            `Você foi removido(a) da extraordinária de ${funcaoNome} em ${dataBr} (substituído).`,
+            'Você foi removido de uma escala — GESOP',
+            `<p>Você foi removido(a) da extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b> (substituído).</p>`,
+            'removido_da_escala',
+          );
+        }
       }
     },
     [escalasExtraordinarias, afastamentos, funcoes, notificarMilitarEscalado],
   );
 
-  const deleteEscalaExtraordinaria = useCallback(async (id: string) => {
-    const db = requireDb();
-    await deleteDoc(doc(db, 'escalas_extraordinarias', id));
-  }, []);
+  const deleteEscalaExtraordinaria = useCallback(
+    async (id: string) => {
+      const db = requireDb();
+      const atual = escalasExtraordinarias.find((e) => e.id === id);
+      await deleteDoc(doc(db, 'escalas_extraordinarias', id));
+      if (!atual) return;
+      const funcaoNome = funcoes.find((f) => f.id === atual.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(atual.data);
+      await notificarMilitarEscalado(
+        atual.militarId,
+        `Você foi removido(a) da extraordinária de ${funcaoNome} em ${dataBr}.`,
+        'Você foi removido de uma escala — GESOP',
+        `<p>Você foi removido(a) da extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+        'removido_da_escala',
+      );
+    },
+    [escalasExtraordinarias, funcoes, notificarMilitarEscalado],
+  );
 
   /**
    * Dispara uma vaga extraordinária (podendo pedir mais de um militar) pro
@@ -1529,6 +1577,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           'Você foi escalado — GESOP',
           `<p>Você foi escalado(a) numa escala diferenciada de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
         );
+        if (atual.militarId !== dados.militarId) {
+          await notificarMilitarEscalado(
+            atual.militarId,
+            `Você foi removido(a) da escala diferenciada de ${funcaoNome} em ${dataBr} (substituído).`,
+            'Você foi removido de uma escala — GESOP',
+            `<p>Você foi removido(a) da escala diferenciada de <b>${funcaoNome}</b> em <b>${dataBr}</b> (substituído).</p>`,
+            'removido_da_escala',
+          );
+        }
       }
     },
     [escalasDiferenciadas, funcoes, notificarMilitarEscalado],
@@ -1542,8 +1599,19 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         await deleteDoc(doc(db, 'escalas_ordinarias', atual.escalaOrdinariaId)).catch(() => undefined);
       }
       await deleteDoc(doc(db, 'escalas_diferenciadas', id));
+      if (atual) {
+        const funcaoNome = funcoes.find((f) => f.id === atual.funcao)?.nome ?? 'função removida';
+        const dataBr = formatarDataBr(atual.data);
+        await notificarMilitarEscalado(
+          atual.militarId,
+          `Você foi removido(a) da escala diferenciada de ${funcaoNome} em ${dataBr}.`,
+          'Você foi removido de uma escala — GESOP',
+          `<p>Você foi removido(a) da escala diferenciada de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+          'removido_da_escala',
+        );
+      }
     },
-    [escalasDiferenciadas],
+    [escalasDiferenciadas, funcoes, notificarMilitarEscalado],
   );
 
   // --- Fechamento / Histórico de escala --------------------------------------
