@@ -232,6 +232,11 @@ function semIndefinidosParaAtualizar<T extends object>(dados: T): Record<string,
   return Object.fromEntries(Object.entries(dados).map(([k, v]) => [k, v === undefined ? deleteField() : v]));
 }
 
+/** yyyy-MM-dd -> dd/MM/yyyy, pra mensagens de notificação. */
+function formatarDataBr(data: string): string {
+  return data.split('-').reverse().join('/');
+}
+
 /**
  * `filtro` aplica um `where(campo, '==', valor)` na query — necessário
  * sempre que as firestore.rules da coleção exigem uma condição de leitura
@@ -432,6 +437,28 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
     },
     [],
+  );
+
+  /**
+   * Avisa o militar (alerta no sistema + e-mail) sempre que ele entra numa
+   * escala — ordinária ou extraordinária, gerada automaticamente ou
+   * lançada manualmente pelo escalante. Só notifica quem já tem conta
+   * vinculada (`usuarios.militarId`) — um militar cadastrado no Efetivo mas
+   * que ainda não fez o primeiro acesso simplesmente não recebe nada, sem
+   * erro nem bloqueio.
+   */
+  const notificarMilitarEscalado = useCallback(
+    async (militarId: string, mensagemAlerta: string, assuntoEmail: string, htmlEmail: string) => {
+      const usuarioMilitar = usuarios.find((u) => u.militarId === militarId);
+      if (!usuarioMilitar) return;
+      await notificar(usuarioMilitar.id, 'escalado', mensagemAlerta, '/sistema/escala');
+      try {
+        await enviarEmail({ to: usuarioMilitar.email, subject: assuntoEmail, html: htmlEmail });
+      } catch (erroEnvio) {
+        console.error('Erro ao enviar e-mail de escalação:', erroEnvio);
+      }
+    },
+    [usuarios, notificar],
   );
 
   /** Notifica por e-mail o(s) Comandante/Escalante de uma UBM sobre uma nova solicitação de acesso. */
@@ -929,15 +956,49 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         await lote.commit();
       }
 
+      // Um resumo por militar (não um e-mail por dia gerado) — uma geração
+      // pode cobrir um ano inteiro de uma vez, então notificar dia a dia
+      // enviaria dezenas de e-mails de uma vez pra mesma pessoa.
+      const datasPorMilitar = new Map<string, string[]>();
+      geradas.forEach((item) => {
+        if (!datasPorMilitar.has(item.militarId)) datasPorMilitar.set(item.militarId, []);
+        datasPorMilitar.get(item.militarId)!.push(item.data);
+      });
+      await Promise.all(
+        Array.from(datasPorMilitar.entries()).map(([militarId, datas]) => {
+          const datasOrdenadas = [...datas].sort().map(formatarDataBr);
+          const plural = datasOrdenadas.length > 1 ? `${datasOrdenadas.length} dias` : '1 dia';
+          return notificarMilitarEscalado(
+            militarId,
+            `Você entrou na previsão da escala ordinária em ${plural}: ${datasOrdenadas.join(', ')}.`,
+            'Nova previsão de escala — GESOP',
+            `<p>Você entrou na previsão da escala ordinária em <b>${plural}</b>:</p><p>${datasOrdenadas.join(', ')}</p>`,
+          );
+        }),
+      );
+
       return geradas.length;
     },
-    [funcoes, militares, afastamentos, escalasOrdinarias],
+    [funcoes, militares, afastamentos, escalasOrdinarias, notificarMilitarEscalado],
   );
 
-  const updateEscalaOrdinaria = useCallback(async (id: string, militarId: string) => {
-    const db = requireDb();
-    await updateDoc(doc(db, 'escalas_ordinarias', id), { militarId, origem: 'manual' });
-  }, []);
+  const updateEscalaOrdinaria = useCallback(
+    async (id: string, militarId: string) => {
+      const db = requireDb();
+      await updateDoc(doc(db, 'escalas_ordinarias', id), { militarId, origem: 'manual' });
+      const entrada = escalasOrdinarias.find((e) => e.id === id);
+      if (!entrada) return;
+      const funcaoNome = funcoes.find((f) => f.id === entrada.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(entrada.data);
+      await notificarMilitarEscalado(
+        militarId,
+        `Você foi escalado(a) pra ${funcaoNome} em ${dataBr}.`,
+        'Você foi escalado — GESOP',
+        `<p>Você foi escalado(a) pra <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+      );
+    },
+    [escalasOrdinarias, funcoes, notificarMilitarEscalado],
+  );
 
   /**
    * Kanban por função: mais de um militar pode estar escalado na mesma
@@ -945,10 +1006,23 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
    * cartão pra outro dia sempre MOVE (nunca troca de lugar com quem já
    * estiver lá, já que os dois podem coexistir na célula de destino).
    */
-  const moverDataEscalaOrdinaria = useCallback(async (id: string, novaData: string) => {
-    const db = requireDb();
-    await updateDoc(doc(db, 'escalas_ordinarias', id), { data: novaData, origem: 'manual' });
-  }, []);
+  const moverDataEscalaOrdinaria = useCallback(
+    async (id: string, novaData: string) => {
+      const db = requireDb();
+      await updateDoc(doc(db, 'escalas_ordinarias', id), { data: novaData, origem: 'manual' });
+      const entrada = escalasOrdinarias.find((e) => e.id === id);
+      if (!entrada) return;
+      const funcaoNome = funcoes.find((f) => f.id === entrada.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(novaData);
+      await notificarMilitarEscalado(
+        entrada.militarId,
+        `Sua escala de ${funcaoNome} foi remarcada pra ${dataBr}.`,
+        'Sua escala foi remarcada — GESOP',
+        `<p>Sua escala de <b>${funcaoNome}</b> foi remarcada pra <b>${dataBr}</b>.</p>`,
+      );
+    },
+    [escalasOrdinarias, funcoes, notificarMilitarEscalado],
+  );
 
   const deleteEscalaOrdinaria = useCallback(async (id: string) => {
     const db = requireDb();
@@ -956,14 +1030,25 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   /** Kanban por função: adiciona mais um militar numa função+dia que já tem gente (ou começa vazia) — sem mexer nos cartões que já estavam lá. */
-  const adicionarEscalaOrdinaria = useCallback(async (dados: { ubmId: string; funcao: string; data: string; militarId: string }) => {
-    const db = requireDb();
-    await addDoc(collection(db, 'escalas_ordinarias'), {
-      ...dados,
-      origem: 'manual' as EscalaOrdinaria['origem'],
-      criado_em: new Date().toISOString(),
-    });
-  }, []);
+  const adicionarEscalaOrdinaria = useCallback(
+    async (dados: { ubmId: string; funcao: string; data: string; militarId: string }) => {
+      const db = requireDb();
+      await addDoc(collection(db, 'escalas_ordinarias'), {
+        ...dados,
+        origem: 'manual' as EscalaOrdinaria['origem'],
+        criado_em: new Date().toISOString(),
+      });
+      const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(dados.data);
+      await notificarMilitarEscalado(
+        dados.militarId,
+        `Você foi escalado(a) pra ${funcaoNome} em ${dataBr}.`,
+        'Você foi escalado — GESOP',
+        `<p>Você foi escalado(a) pra <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+      );
+    },
+    [funcoes, notificarMilitarEscalado],
+  );
 
   // --- Escala extraordinária ---------------------------------------------
   const criarEscalaExtraordinaria = useCallback(
@@ -1003,9 +1088,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         criadoPorId: usuarioAtual?.id ?? '',
         criado_em: new Date().toISOString(),
       });
+
+      const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(dados.data);
+      await notificarMilitarEscalado(
+        militarFinal,
+        `Você foi escalado(a) pra uma extraordinária de ${funcaoNome} em ${dataBr} (${dados.motivo}).`,
+        'Você foi escalado — GESOP',
+        `<p>Você foi escalado(a) pra uma extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p><p>Motivo: ${dados.motivo}</p>`,
+      );
       return ref.id;
     },
-    [militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarioAtual],
+    [militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarioAtual, funcoes, notificarMilitarEscalado],
   );
 
   const alterarMilitarExtraordinaria = useCallback(
@@ -1018,8 +1112,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       // O militarSugeridoId nunca é sobrescrito — a estatística de rodízio
       // continua contando como se a sugestão tivesse sido seguida.
       await updateDoc(doc(db, 'escalas_extraordinarias', id), { militarId });
+      if (atual) {
+        const funcaoNome = funcoes.find((f) => f.id === atual.funcao)?.nome ?? 'função removida';
+        const dataBr = formatarDataBr(atual.data);
+        await notificarMilitarEscalado(
+          militarId,
+          `Você foi escalado(a) pra uma extraordinária de ${funcaoNome} em ${dataBr} (${atual.motivo}).`,
+          'Você foi escalado — GESOP',
+          `<p>Você foi escalado(a) pra uma extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p><p>Motivo: ${atual.motivo}</p>`,
+        );
+      }
     },
-    [escalasExtraordinarias],
+    [escalasExtraordinarias, afastamentos, funcoes, notificarMilitarEscalado],
   );
 
   const deleteEscalaExtraordinaria = useCallback(async (id: string) => {
@@ -1137,11 +1241,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       });
 
       const funcaoNome = funcoes.find((f) => f.id === vaga.funcao)?.nome ?? 'Função removida';
-      await notificar(
-        usuarioAtual!.id,
-        'vaga_voluntaria_resolvida',
-        `Você se voluntariou e foi confirmado pra escala extraordinária de ${funcaoNome} em ${vaga.data}.`,
-        '/sistema/escala',
+      const dataBr = formatarDataBr(vaga.data);
+      await notificarMilitarEscalado(
+        militarId,
+        `Você se voluntariou e foi confirmado pra escala extraordinária de ${funcaoNome} em ${dataBr}.`,
+        'Você foi escalado — GESOP',
+        `<p>Você se voluntariou e foi confirmado(a) pra escala extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
       );
       if (novoStatus === 'preenchida') {
         const gestaoDaUbm = usuarios.filter(
@@ -1159,7 +1264,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         );
       }
     },
-    [vagasVoluntariasExtraordinarias, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
+    [vagasVoluntariasExtraordinarias, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar, notificarMilitarEscalado],
   );
 
   /**
@@ -1200,6 +1305,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       });
 
       const funcaoNome = funcoes.find((f) => f.id === vaga.funcao)?.nome ?? 'Função removida';
+      const dataBr = formatarDataBr(vaga.data);
       await Promise.all(
         escolhidos.map(async (m) => {
           await addDoc(collection(db, 'escalas_extraordinarias'), {
@@ -1213,19 +1319,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             criadoPorId: usuarioAtual?.id ?? '',
             criado_em: new Date().toISOString(),
           });
-          const usuarioMilitar = usuarios.find((u) => u.militarId === m.id);
-          if (usuarioMilitar) {
-            await notificar(
-              usuarioMilitar.id,
-              'vaga_voluntaria_resolvida',
-              `Ninguém se voluntariou a tempo — você foi escalado compulsoriamente pra ${funcaoNome} em ${vaga.data}.`,
-              '/sistema/escala',
-            );
-          }
+          await notificarMilitarEscalado(
+            m.id,
+            `Ninguém se voluntariou a tempo — você foi escalado compulsoriamente pra ${funcaoNome} em ${dataBr}.`,
+            'Você foi escalado — GESOP',
+            `<p>Ninguém se voluntariou a tempo — você foi escalado(a) compulsoriamente pra <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+          );
         }),
       );
     },
-    [vagasVoluntariasExtraordinarias, militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
+    [vagasVoluntariasExtraordinarias, militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificarMilitarEscalado],
   );
 
   // --- Solicitação de Reforço (CRB/COP -> UBM) ------------------------------
@@ -1390,8 +1493,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         criadoPorId: usuarioAtual?.id ?? '',
         criado_em: agora,
       });
+
+      const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(dados.data);
+      await notificarMilitarEscalado(
+        dados.militarId,
+        `Você foi escalado(a) numa escala diferenciada de ${funcaoNome} em ${dataBr}.`,
+        'Você foi escalado — GESOP',
+        `<p>Você foi escalado(a) numa escala diferenciada de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+      );
     },
-    [usuarioAtual, escalasOrdinarias],
+    [usuarioAtual, escalasOrdinarias, funcoes, notificarMilitarEscalado],
   );
 
   const atualizarEscalaDiferenciada = useCallback(
@@ -1405,8 +1517,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         doc(db, 'escalas_ordinarias', atual.escalaOrdinariaId),
         semIndefinidosParaAtualizar({ militarId: dados.militarId, funcao: dados.funcao, data: dados.data }),
       );
+
+      if (dados.militarId) {
+        const funcaoId = dados.funcao ?? atual.funcao;
+        const dataFinal = dados.data ?? atual.data;
+        const funcaoNome = funcoes.find((f) => f.id === funcaoId)?.nome ?? 'função removida';
+        const dataBr = formatarDataBr(dataFinal);
+        await notificarMilitarEscalado(
+          dados.militarId,
+          `Você foi escalado(a) numa escala diferenciada de ${funcaoNome} em ${dataBr}.`,
+          'Você foi escalado — GESOP',
+          `<p>Você foi escalado(a) numa escala diferenciada de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+        );
+      }
     },
-    [escalasDiferenciadas],
+    [escalasDiferenciadas, funcoes, notificarMilitarEscalado],
   );
 
   const removerEscalaDiferenciada = useCallback(

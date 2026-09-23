@@ -561,6 +561,7 @@ export type TipoAlerta =
   | 'vaga_voluntaria_disponivel'
   | 'vaga_voluntaria_resolvida'
   | 'militar_nao_encontrado_na_planilha'
+  | 'escalado'
   | 'geral';
 
 export interface Alerta {
