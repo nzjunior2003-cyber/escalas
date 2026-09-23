@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Send, Check, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { extraordinariasNoMes, formatarDataISO, LIMITE_EXTRAORDINARIAS_POR_MES } from '../../lib/escala';
-import { STATUS_SOLICITACAO_REFORCO_LABELS, temPapel } from '../../types';
+import { STATUS_SOLICITACAO_REFORCO_LABELS, temPapel, TIPO_REFORCO_LABELS, type TipoReforco } from '../../types';
 
 export default function Reforcos() {
   const { usuarioAtual } = useApp();
@@ -32,7 +32,14 @@ function PainelComando() {
   const { usuarioAtual, comandos, ubms, funcoes, militares, solicitacoesReforco, escalasComando, criarSolicitacaoReforco } = useApp();
   const meuComando = comandos.find((c) => c.id === usuarioAtual?.comandoId);
 
-  const [form, setForm] = useState({ ubmId: '', funcao: '', postoDesejado: '', data: formatarDataISO(new Date()), motivo: '' });
+  const [form, setForm] = useState<{ ubmId: string; funcao: string; postoDesejado: string; data: string; tipo: TipoReforco; motivo: string }>({
+    ubmId: '',
+    funcao: '',
+    postoDesejado: '',
+    data: formatarDataISO(new Date()),
+    tipo: 'escala_extraordinaria',
+    motivo: '',
+  });
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -76,9 +83,10 @@ function PainelComando() {
         funcao: form.funcao,
         postoDesejado: form.postoDesejado || undefined,
         data: form.data,
+        tipo: form.tipo,
         motivo: form.motivo,
       });
-      setForm({ ubmId: '', funcao: '', postoDesejado: '', data: formatarDataISO(new Date()), motivo: '' });
+      setForm({ ubmId: '', funcao: '', postoDesejado: '', data: formatarDataISO(new Date()), tipo: 'escala_extraordinaria', motivo: '' });
     } catch (erroCriar) {
       setErro(erroCriar instanceof Error ? erroCriar.message : 'Não foi possível criar a solicitação.');
     } finally {
@@ -123,6 +131,19 @@ function PainelComando() {
             <label className="block text-xs font-medium text-gray-500 mb-1">Data</label>
             <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Tipo</label>
+            <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value as TipoReforco })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3">
+              {(Object.entries(TIPO_REFORCO_LABELS) as [TipoReforco, string][]).map(([v, label]) => (
+                <option key={v} value={v}>{label}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-400">
+              {form.tipo === 'escala_extraordinaria'
+                ? 'Conta no teto mensal de extraordinárias do militar; não gera recuperação ao voltar.'
+                : 'Não entra no teto mensal; para a contagem de equidade e gera recuperação ao voltar, como missão externa.'}
+            </p>
+          </div>
           <div className="sm:col-span-2">
             <label className="block text-xs font-medium text-gray-500 mb-1">Motivo (ex.: nome da operação/evento)</label>
             <input required value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} className="w-full border border-gray-300 rounded-md text-sm py-2 px-3" />
@@ -141,7 +162,7 @@ function PainelComando() {
           minhasSolicitacoes.map((s) => (
             <div key={s.id} className="flex flex-col sm:flex-row sm:items-center gap-1 px-4 py-3 text-sm">
               <div className="min-w-0 flex-1">
-                <div className="font-medium text-gray-900">{nomeUbm(s.ubmId)} — {nomeFuncao(s.funcao)}</div>
+                <div className="font-medium text-gray-900">{nomeUbm(s.ubmId)} — {nomeFuncao(s.funcao)} <span className="font-normal text-gray-400">({TIPO_REFORCO_LABELS[s.tipo] ?? 'Escala Extraordinária'})</span></div>
                 <div className="text-gray-500">{s.data} · {STATUS_SOLICITACAO_REFORCO_LABELS[s.status]}{s.status === 'atendida' ? ` · ${nomeMilitar(s.militarId)}` : ''}</div>
               </div>
             </div>
@@ -235,7 +256,7 @@ function PainelUbm() {
               <div key={s.id} className="bg-white rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="text-sm">
-                    <p className="font-medium text-gray-900">{nomeComando(s.comandoId)} pediu reforço — {nomeFuncao(s.funcao)}</p>
+                    <p className="font-medium text-gray-900">{nomeComando(s.comandoId)} pediu reforço — {nomeFuncao(s.funcao)} <span className="font-normal text-gray-400">({TIPO_REFORCO_LABELS[s.tipo] ?? 'Escala Extraordinária'})</span></p>
                     <p className="text-gray-500">
                       Data: {s.data} {s.postoDesejado ? `· Posto desejado: ${s.postoDesejado}` : ''} · Motivo: {s.motivo}
                     </p>

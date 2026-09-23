@@ -71,6 +71,7 @@ import {
   StatusSolicitacaoServico,
   StatusVagaVoluntaria,
   TipoEscalaServico,
+  TipoReforco,
   Ubm,
   Usuario,
   VagaVoluntariaExtraordinaria,
@@ -203,6 +204,7 @@ interface AppContextData {
     funcao: string;
     postoDesejado?: string;
     data: string;
+    tipo: TipoReforco;
     motivo: string;
   }) => Promise<string>;
   /** Escalante/Comandante da UBM atende (empenha o militar) ou recusa. */
@@ -1228,7 +1230,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   // --- Solicitação de Reforço (CRB/COP -> UBM) ------------------------------
   const criarSolicitacaoReforco = useCallback(
-    async (dados: { comandoId: string; ubmId: string; funcao: string; postoDesejado?: string; data: string; motivo: string }) => {
+    async (dados: { comandoId: string; ubmId: string; funcao: string; postoDesejado?: string; data: string; tipo: TipoReforco; motivo: string }) => {
       const db = requireDb();
       const sugerido = sugerirMilitarExtraordinario({
         ubmId: dados.ubmId,
@@ -1262,10 +1264,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   /**
-   * Atender NUNCA mexe na escala do sistema — gera um Afastamento (motivo
-   * 'reforco_crb_cop') pro militar empenhado, que já o torna indisponível
-   * na própria UBM nesse período e credita normalmente na equidade (fila de
-   * recuperação, ver MOTIVOS_COM_FILA_DE_RECUPERACAO).
+   * Atender NUNCA mexe na escala do sistema — gera um Afastamento pro
+   * militar empenhado, que já o torna indisponível na própria UBM nesse
+   * período. O motivo (e o comportamento de equidade que ele carrega)
+   * depende do tipo da solicitação — ver nota em `SolicitacaoReforco`:
+   * 'escala_extraordinaria' vira motivo 'reforco_crb_cop' (descanso
+   * reconhecido, sem fila de recuperação, conta no teto mensal de
+   * extraordinárias); 'missao' vira motivo 'missao_externa' (para a
+   * contagem e gera fila de recuperação, sem teto mensal — orçamento
+   * próprio).
    */
   const responderSolicitacaoReforco = useCallback(
     async (id: string, decisao: { atender: boolean; militarId?: string }) => {
@@ -1276,7 +1283,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (decisao.atender) {
         const militarFinal = decisao.militarId ?? solicitacao.militarSugeridoId;
         if (!militarFinal) throw new Error('Nenhum militar selecionado pra atender essa solicitação.');
-        if (extraordinariasNoMes(militarFinal, solicitacao.data, escalasExtraordinarias, afastamentos) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
+        if (
+          solicitacao.tipo === 'escala_extraordinaria' &&
+          extraordinariasNoMes(militarFinal, solicitacao.data, escalasExtraordinarias, afastamentos) >= LIMITE_EXTRAORDINARIAS_POR_MES
+        ) {
           throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
         }
 
@@ -1284,7 +1294,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         await addDoc(collection(db, 'afastamentos'), {
           militarId: militarFinal,
           ubmId: solicitacao.ubmId,
-          motivo: 'reforco_crb_cop',
+          motivo: solicitacao.tipo === 'missao' ? 'missao_externa' : 'reforco_crb_cop',
           detalhe: `${comando ? `${comando.sigla} — ` : ''}${solicitacao.motivo}`,
           dataInicio: solicitacao.data,
           dataFim: solicitacao.data,

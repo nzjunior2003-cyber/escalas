@@ -305,11 +305,15 @@ export const MOTIVO_AFASTAMENTO_LABELS: Record<MotivoAfastamento, string> = {
  * `src/lib/escala.ts`): a pessoa segue "devendo" o serviço e é priorizada
  * ao voltar. Dispensa médica é autorizada pela junta médica e NÃO entra
  * aqui — só o atestado médico comum (avaliação isolada, sem passar pela
- * junta), a missão externa e o reforço pra CRB/COP geram essa fila (nos
- * três casos a pessoa seguiu servindo, só que fora da rotação normal da
- * própria UBM).
+ * junta) e a missão externa geram essa fila (a pessoa seguiu servindo, só
+ * que fora da rotação normal da própria UBM). O reforço pra CRB/COP
+ * (`reforco_crb_cop`) fica de fora de propósito: quando é pra cobrir uma
+ * extraordinária comum, o militar só está servindo emprestado a outro
+ * comando — trata-se como descanso reconhecido, sem dívida (ver nota em
+ * `SolicitacaoReforco`, tipo 'escala_extraordinaria'); reforço pra missão/
+ * operação usa o motivo `missao_externa` diretamente, esse sim com fila.
  */
-export const MOTIVOS_COM_FILA_DE_RECUPERACAO: MotivoAfastamento[] = ['atestado_medico', 'missao_externa', 'reforco_crb_cop'];
+export const MOTIVOS_COM_FILA_DE_RECUPERACAO: MotivoAfastamento[] = ['atestado_medico', 'missao_externa'];
 
 export interface Afastamento {
   id: string;
@@ -464,14 +468,25 @@ export interface SolicitacaoServico {
 // ---------------------------------------------------------------------------
 // Solicitação de Reforço (CRB/COP -> UBM)
 //
-// O CRB ou o COP pede militares de uma função/posto pra uma UBM vinculada,
-// pra atender escala extraordinária ou operação. O escalante da UBM recebe
-// alerta, vê a sugestão automática do sistema (mesmo motor de equidade —
-// `sugerirMilitarExtraordinario`), pode trocar o militar e atende ou recusa.
-// Atender NUNCA mexe na escala do sistema — em vez disso, gera um
-// `Afastamento` (motivo 'reforco_crb_cop') pro militar empenhado, o que já
-// o torna indisponível pra ser escalado na própria UBM nesse período e o
-// credita normalmente na equidade (ver MOTIVOS_COM_FILA_DE_RECUPERACAO).
+// O CRB ou o COP pede militares de uma função/posto pra uma UBM vinculada.
+// O `tipo` diferencia duas naturezas de serviço bem distintas:
+//
+// - 'escala_extraordinaria': reforço pra cobrir uma extraordinária comum —
+//   pro militar, é só mais um serviço extraordinário, só que emprestado a
+//   outro comando. Conta no teto mensal de `LIMITE_EXTRAORDINARIAS_POR_MES`
+//   e NÃO gera fila de recuperação (motivo 'reforco_crb_cop', tratado como
+//   descanso reconhecido — ver `MOTIVOS_COM_FILA_DE_RECUPERACAO`).
+// - 'missao': operação com diárias, fora da rotação normal — tem orçamento/
+//   natureza própria, então NÃO entra no teto mensal de extraordinárias.
+//   Gera o Afastamento com motivo 'missao_externa', que PARA a contagem de
+//   equidade e gera fila de recuperação ao voltar, exatamente como qualquer
+//   outra missão externa.
+//
+// O escalante da UBM recebe alerta, vê a sugestão automática do sistema
+// (mesmo motor de equidade — `sugerirMilitarExtraordinario`), pode trocar o
+// militar e atende ou recusa. Atender NUNCA mexe na escala do sistema — em
+// vez disso, gera o `Afastamento` correspondente pro militar empenhado, o
+// que já o torna indisponível pra ser escalado na própria UBM nesse período.
 // ---------------------------------------------------------------------------
 export type StatusSolicitacaoReforco = 'pendente' | 'atendida' | 'recusada';
 
@@ -479,6 +494,13 @@ export const STATUS_SOLICITACAO_REFORCO_LABELS: Record<StatusSolicitacaoReforco,
   pendente: 'Pendente',
   atendida: 'Atendida',
   recusada: 'Recusada',
+};
+
+export type TipoReforco = 'escala_extraordinaria' | 'missao';
+
+export const TIPO_REFORCO_LABELS: Record<TipoReforco, string> = {
+  escala_extraordinaria: 'Escala Extraordinária',
+  missao: 'Missão/Operação',
 };
 
 export interface SolicitacaoReforco {
@@ -490,6 +512,9 @@ export interface SolicitacaoReforco {
   /** Posto/graduação desejado — texto livre (ex.: "Sargento"), opcional. */
   postoDesejado?: string;
   data: string; // yyyy-MM-dd
+  /** Decide o comportamento do Afastamento gerado ao atender — ver nota acima. */
+  tipo: TipoReforco;
+  /** Nome/descrição livre (ex.: "Operação Verão 2026"). */
   motivo: string;
   status: StatusSolicitacaoReforco;
   /** Sugestão automática do sistema (mesmo motor de equidade da extraordinária). */

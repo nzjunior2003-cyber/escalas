@@ -12,7 +12,7 @@ import {
   mediaFolgasPorCargoEFuncao,
   volumeTrabalhoPorCargo,
 } from '../../lib/painelRegional';
-import { MOTIVO_AFASTAMENTO_LABELS, TIPO_COMANDO_LABELS, temPapel, type Comando } from '../../types';
+import { MOTIVO_AFASTAMENTO_LABELS, TIPO_COMANDO_LABELS, TIPO_REFORCO_LABELS, temPapel, type Comando, type TipoReforco } from '../../types';
 
 export default function PainelRegional() {
   const { usuarioAtual, comandos } = useApp();
@@ -305,7 +305,13 @@ function VisaoUbm({ ubmId, nomeUbm, comandoOrigemId }: { ubmId: string; nomeUbm:
 function ModalSolicitarReforco({ ubmId, comandoId, onClose }: { ubmId: string; comandoId: string; onClose: () => void }) {
   const { funcoes, criarSolicitacaoReforco } = useApp();
   const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
-  const [form, setForm] = useState({ funcao: funcoesDaUbm[0]?.id ?? '', postoDesejado: '', data: formatarDataISO(new Date()), motivo: '' });
+  const [form, setForm] = useState<{ funcao: string; postoDesejado: string; data: string; tipo: TipoReforco; motivo: string }>({
+    funcao: funcoesDaUbm[0]?.id ?? '',
+    postoDesejado: '',
+    data: formatarDataISO(new Date()),
+    tipo: 'escala_extraordinaria',
+    motivo: '',
+  });
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -321,6 +327,7 @@ function ModalSolicitarReforco({ ubmId, comandoId, onClose }: { ubmId: string; c
         funcao: form.funcao,
         postoDesejado: form.postoDesejado || undefined,
         data: form.data,
+        tipo: form.tipo,
         motivo: form.motivo,
       });
       onClose();
@@ -350,6 +357,14 @@ function ModalSolicitarReforco({ ubmId, comandoId, onClose }: { ubmId: string; c
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
             <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+            <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value as TipoReforco })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm">
+              {(Object.entries(TIPO_REFORCO_LABELS) as [TipoReforco, string][]).map(([v, label]) => (
+                <option key={v} value={v}>{label}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Motivo (ex.: nome da operação/evento)</label>
