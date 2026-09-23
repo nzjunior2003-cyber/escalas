@@ -131,14 +131,16 @@ export function diasIsentosAteData(militarId: string, ateData: string, afastamen
  * funções são processadas em ordem crescente de tamanho a cada dia, e quem
  * já foi escalado em uma função naquele dia sai do páreo das demais.
  *
- * Dentro de cada função, o critério continua o mesmo: quem tem MENOS
- * serviços acumulados NAQUELA função (ver nota do módulo) entre os
- * disponíveis — pulando quem estiver afastado —, desempatando por quem
- * serviu há mais tempo (ou nunca serviu). Precisa do histórico já
- * persistido (`escalasOrdinariasExistentes`, de QUALQUER função da UBM,
- * pra respeitar exclusividade por dia mesmo com lançamentos manuais
- * anteriores) — sem ele, cada geração recomeçaria do zero e favoreceria
- * sempre os primeiros da lista.
+ * A contagem de equidade é por MILITAR, não por função: um dia de serviço
+ * conta pro total dele independente de qual função ele cobriu naquele dia —
+ * a função só decide QUEM PODE ser escalado nela (precisa ter a função
+ * atribuída), nunca separa a contagem em filas por função. Entre os
+ * elegíveis e disponíveis de uma função, vence quem tem MENOS serviços
+ * acumulados no total (qualquer função), desempatando por quem serviu há
+ * mais tempo (ou nunca serviu). Precisa do histórico já persistido
+ * (`escalasOrdinariasExistentes`, de QUALQUER função da UBM) pra contar
+ * certo — sem ele, cada geração recomeçaria do zero e favoreceria sempre
+ * os primeiros da lista.
  */
 export function gerarEscalaOrdinariaUbm(params: {
   ubmId: string;
@@ -161,15 +163,15 @@ export function gerarEscalaOrdinariaUbm(params: {
     (a, b) => (elegiveisPorFuncao.get(a.id)?.length ?? 0) - (elegiveisPorFuncao.get(b.id)?.length ?? 0),
   );
 
-  // Chave composta militarId|funcaoId: cada função mantém sua própria
-  // contagem de equidade, mesmo pra quem acumula mais de uma.
-  const chave = (militarId: string, funcaoId: string) => `${militarId}|${funcaoId}`;
+  // Contagem e último serviço por militar (não por função) — todo mundo que
+  // aparece em pelo menos uma função ativa entra aqui uma única vez.
+  const todosElegiveis = new Map<string, Militar>();
+  elegiveisPorFuncao.forEach((lista) => lista.forEach((m) => todosElegiveis.set(m.id, m)));
+
   const contagem = new Map<string, number>();
   const ultimoServico = new Map<string, string>();
-  funcoesAtivas.forEach((f) => {
-    (elegiveisPorFuncao.get(f.id) ?? []).forEach((m) => {
-      contagem.set(chave(m.id, f.id), diasIsentosAteData(m.id, dataFim, afastamentos));
-    });
+  todosElegiveis.forEach((_m, militarId) => {
+    contagem.set(militarId, diasIsentosAteData(militarId, dataFim, afastamentos));
   });
 
   const diasJaEscaladosPorFuncao = new Map<string, Set<string>>(funcoesAtivas.map((f) => [f.id, new Set<string>()]));
@@ -179,11 +181,10 @@ export function gerarEscalaOrdinariaUbm(params: {
     diasJaEscaladosPorFuncao.get(e.funcao)?.add(e.data);
     if (!militarOcupadoNoDia.has(e.data)) militarOcupadoNoDia.set(e.data, new Set());
     militarOcupadoNoDia.get(e.data)!.add(e.militarId);
-    const k = chave(e.militarId, e.funcao);
-    if (!contagem.has(k)) continue;
-    contagem.set(k, (contagem.get(k) ?? 0) + 1);
-    const atual = ultimoServico.get(k);
-    if (!atual || e.data > atual) ultimoServico.set(k, e.data);
+    if (!contagem.has(e.militarId)) continue;
+    contagem.set(e.militarId, (contagem.get(e.militarId) ?? 0) + 1);
+    const atual = ultimoServico.get(e.militarId);
+    if (!atual || e.data > atual) ultimoServico.set(e.militarId, e.data);
   }
 
   const resultado: Omit<EscalaOrdinaria, 'id' | 'criado_em'>[] = [];
@@ -203,18 +204,15 @@ export function gerarEscalaOrdinariaUbm(params: {
       if (disponiveis.length === 0) continue;
 
       disponiveis.sort((a, b) => {
-        const ka = chave(a.id, funcao.id);
-        const kb = chave(b.id, funcao.id);
-        const diferenca = (contagem.get(ka) ?? 0) - (contagem.get(kb) ?? 0);
+        const diferenca = (contagem.get(a.id) ?? 0) - (contagem.get(b.id) ?? 0);
         if (diferenca !== 0) return diferenca;
-        return (ultimoServico.get(ka) ?? '').localeCompare(ultimoServico.get(kb) ?? '');
+        return (ultimoServico.get(a.id) ?? '').localeCompare(ultimoServico.get(b.id) ?? '');
       });
       const escolhido = disponiveis[0];
-      const k = chave(escolhido.id, funcao.id);
 
       resultado.push({ ubmId, funcao: funcao.id, data: dataStr, militarId: escolhido.id, origem: 'gerada' });
-      contagem.set(k, (contagem.get(k) ?? 0) + 1);
-      ultimoServico.set(k, dataStr);
+      contagem.set(escolhido.id, (contagem.get(escolhido.id) ?? 0) + 1);
+      ultimoServico.set(escolhido.id, dataStr);
       ocupadosHoje.add(escolhido.id);
       jaEscalados.add(dataStr);
     }
