@@ -160,9 +160,13 @@ comunicado formalmente à DTIC.
   Aviso de privacidade e consentimento explícito implementados na tela de
   solicitação de acesso (`src/components/LoginModal.tsx`).
 - **Base de pessoas**: consumida ao vivo da planilha pública de efetivo do
-  CBMPA (busca em tempo real, sem cópia local versionada) — **não
-  integrado ao SI3** (Cap. 8.1 da PIDS), pendência que depende de a DTIC
-  disponibilizar API/acesso ao SI3.
+  CBMPA (busca em tempo real, sem cópia local versionada) — solução
+  provisória adotada justamente para evitar manter uma base paralela
+  própria (o que o Cap. 8.2 da PIDS desaconselha). **Não integrado ao
+  SI3** (Cap. 8.1 da PIDS); a planilha deve ser substituída pela
+  integração com o SI3 assim que a DTIC disponibilizar API/acesso — não
+  pela criação de uma cópia do efetivo no banco do próprio GESOP, que
+  criaria a mesma base paralela que se busca evitar.
 - **Auditoria e rastreabilidade**: toda alteração de escala (inclusão,
   troca, remoção) gera registro de histórico e notificação (alerta +
   e-mail) ao militar afetado, com autor, data/hora e operação realizada.
