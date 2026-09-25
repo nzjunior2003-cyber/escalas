@@ -282,6 +282,64 @@ export interface VagaVoluntariaExtraordinaria {
 }
 
 // ---------------------------------------------------------------------------
+// Reforço de operação (CRB/COP) — um único pedido em massa (ex.: 25
+// militares pra prevenção num jogo) distribuído automaticamente entre as
+// UBMs subordinadas ao comando, proporcional ao efetivo ativo de cada uma
+// (método dos maiores restos, pra bater a soma exata sem editar depois).
+// Sem função obrigatória: qualquer militar ativo da UBM é elegível — é
+// sempre reforço tipo 'missao' (orçamento próprio, não conta no teto de
+// LIMITE_EXTRAORDINARIAS_POR_MES, vira afastamento com fila de recuperação).
+// Cada UBM recebe sua cota (`cotas`) mas quem decide quando abrir
+// voluntariado pros próprios militares é o escalante dela — ver
+// `VagaVoluntariaOperacao`.
+// ---------------------------------------------------------------------------
+export interface CotaOperacaoUbm {
+  ubmId: string;
+  quantidade: number;
+}
+
+export interface SolicitacaoOperacao {
+  id: string;
+  comandoId: string;
+  /** Nome do evento/operação (ex.: "Jogo Brasileirão - Mangueirão"). */
+  motivo: string;
+  data: string; // yyyy-MM-dd
+  /** Prazo sugerido pro voluntariado — cada UBM pode disparar o próprio antes ou depois, é só uma referência. */
+  prazo: string;
+  quantidadeTotal: number;
+  cotas: CotaOperacaoUbm[];
+  criadoPorId: string;
+  criado_em: string;
+}
+
+export type StatusVagaOperacao = 'aberta' | 'preenchida' | 'expirada_compulsoria';
+
+export const STATUS_VAGA_OPERACAO_LABELS: Record<StatusVagaOperacao, string> = {
+  aberta: 'Aguardando voluntário',
+  preenchida: 'Preenchida por voluntário(s)',
+  expirada_compulsoria: 'Prazo esgotado — completada compulsoriamente',
+};
+
+export interface VagaVoluntariaOperacao {
+  id: string;
+  operacaoId: string;
+  ubmId: string;
+  comandoId: string;
+  motivo: string;
+  data: string;
+  prazo: string;
+  quantidade: number;
+  status: StatusVagaOperacao;
+  /** Todo militar ativo da UBM no momento do disparo (sem exigência de função). */
+  candidatosElegiveisIds: string[];
+  voluntariosIds: string[];
+  militaresCompulsoriosIds?: string[];
+  criadoPorId: string;
+  criado_em: string;
+  resolvido_em?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Escala diferenciada — militares que só podem servir em dias específicos.
 //
 // O escalante cadastra o militar/função/data; ao criar, o sistema já gera o
@@ -592,6 +650,9 @@ export type TipoAlerta =
   | 'removido_da_escala'
   | 'remanejamento_solicitado'
   | 'remanejamento_respondido'
+  | 'operacao_cota_recebida'
+  | 'vaga_operacao_disponivel'
+  | 'vaga_operacao_resolvida'
   | 'geral';
 
 export interface Alerta {

@@ -421,3 +421,32 @@ export function contarExtraordinariasPorMilitar(
   }
   return contagem;
 }
+
+/**
+ * Distribui `total` proporcionalmente entre os pesos informados (ex.:
+ * efetivo ativo de cada UBM), pelo método dos maiores restos — garante que
+ * a soma das cotas bate exatamente com `total` (diferente de um
+ * arredondamento simples, que pode sobrar ou faltar unidade). Pesos zerados
+ * ficam de fora (não recebem cota). Itera pela lista de entrada, então
+ * chame com uma ordem já estável se o desempate por resto importar.
+ */
+export function distribuirProporcional(total: number, pesos: { id: string; peso: number }[]): { id: string; quantidade: number }[] {
+  const validos = pesos.filter((p) => p.peso > 0);
+  const somaPesos = validos.reduce((acc, p) => acc + p.peso, 0);
+  if (total <= 0 || somaPesos <= 0) return validos.map((p) => ({ id: p.id, quantidade: 0 }));
+
+  const brutos = validos.map((p) => {
+    const exato = (total * p.peso) / somaPesos;
+    return { id: p.id, base: Math.floor(exato), resto: exato - Math.floor(exato) };
+  });
+
+  let distribuido = brutos.reduce((acc, b) => acc + b.base, 0);
+  let faltam = total - distribuido;
+
+  const porResto = [...brutos].sort((a, b) => b.resto - a.resto);
+  for (let i = 0; i < porResto.length && faltam > 0; i++, faltam--) {
+    porResto[i].base += 1;
+  }
+
+  return brutos.map((b) => ({ id: b.id, quantidade: b.base }));
+}

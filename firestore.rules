@@ -237,7 +237,18 @@ service cloud.firestore {
     }
     match /afastamentos/{documento} {
       allow read: if ativo();
-      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      // Voluntariado de reforço de operação (ver nota em
+      // vagas_voluntarias_operacao): o próprio militar grava o afastamento
+      // de missão pra si mesmo, só quando já consta como voluntário na vaga
+      // referenciada (a vaga é atualizada ANTES desta escrita).
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId)
+        || (
+          ativo()
+          && 'origemOperacaoVagaId' in request.resource.data
+          && request.resource.data.militarId == perfilDoc().militarId
+          && get(/databases/$(database)/documents/vagas_voluntarias_operacao/$(request.resource.data.origemOperacaoVagaId)).data.voluntariosIds.hasAny([perfilDoc().militarId])
+          && get(/databases/$(database)/documents/vagas_voluntarias_operacao/$(request.resource.data.origemOperacaoVagaId)).data.ubmId == request.resource.data.ubmId
+        );
       allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
     }
     match /presencas/{documento} {
@@ -281,6 +292,39 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/comandos/$(request.resource.data.comandoId)).data.ubmIds.hasAny([request.resource.data.ubmId]);
       allow update: if podeGerenciarUbm(resource.data.ubmId);
     }
+    // Reforço de operação em massa (ver nota em types.ts): só quem tem papel
+    // 'crb'/'cop' no próprio comando cria; a distribuição por UBM (`cotas`)
+    // é calculada e gravada de uma vez só, imutável depois (nenhum update
+    // client-side é necessário/permitido). Qualquer usuário ativo lê, pra a
+    // UBM enxergar a própria cota.
+    match /solicitacoes_operacao/{documento} {
+      allow read: if ativo();
+      allow create: if ativo()
+        && (temPapel('crb') || temPapel('cop'))
+        && perfilDoc().comandoId == request.resource.data.comandoId;
+    }
+    // Vaga voluntária de reforço de operação: só quem gerencia a UBM da cota
+    // abre (dispara) o voluntariado; a atualização de voluntariosIds/status
+    // é sempre feita pelo próprio militar que se voluntaria (mesmo padrão de
+    // vagas_voluntarias_extraordinarias) ou por quem gerencia a UBM
+    // (resolução compulsória).
+    match /vagas_voluntarias_operacao/{documento} {
+      allow read: if ativo();
+      allow create: if podeGerenciarUbm(request.resource.data.ubmId);
+      allow update: if podeGerenciarUbm(resource.data.ubmId)
+        || (
+          ativo()
+          && resource.data.status == 'aberta'
+          && resource.data.voluntariosIds.size() < resource.data.quantidade
+          && resource.data.candidatosElegiveisIds.hasAny([perfilDoc().militarId])
+          && request.resource.data.status in ['aberta', 'preenchida']
+          && request.resource.data.voluntariosIds.size() == resource.data.voluntariosIds.size() + 1
+          && request.resource.data.voluntariosIds.size() <= resource.data.quantidade
+          && request.resource.data.voluntariosIds.hasAll(resource.data.voluntariosIds)
+          && request.resource.data.voluntariosIds.hasAny([perfilDoc().militarId])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'voluntariosIds'])
+        );
+    }
     // Escala do Comando (ver nota em types.ts): ledger de reforços recebidos
     // pelo CRB/COP, gravado só quando a UBM cedente atende a solicitação —
     // é por isso que o comando só vê o militar a partir daqui, nunca antes.
@@ -288,7 +332,14 @@ service cloud.firestore {
     // o comando e qualquer usuário ativo só leem.
     match /escalas_comando/{documento} {
       allow read: if ativo();
-      allow create: if podeGerenciarUbm(request.resource.data.ubmOrigemId);
+      allow create: if podeGerenciarUbm(request.resource.data.ubmOrigemId)
+        || (
+          ativo()
+          && 'origemOperacaoVagaId' in request.resource.data
+          && request.resource.data.militarId == perfilDoc().militarId
+          && get(/databases/$(database)/documents/vagas_voluntarias_operacao/$(request.resource.data.origemOperacaoVagaId)).data.voluntariosIds.hasAny([perfilDoc().militarId])
+          && get(/databases/$(database)/documents/vagas_voluntarias_operacao/$(request.resource.data.origemOperacaoVagaId)).data.ubmId == request.resource.data.ubmOrigemId
+        );
       allow update, delete: if master();
     }
     match /alertas/{documento} {

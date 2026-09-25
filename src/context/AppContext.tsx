@@ -42,6 +42,8 @@ import {
 import { enviarEmail } from '../lib/emailService';
 import {
   LIMITE_EXTRAORDINARIAS_POR_MES,
+  distribuirProporcional,
+  estaAfastado,
   extraordinariasNoMes,
   gerarEscalaOrdinariaUbm,
   ordenarCandidatosExtraordinario,
@@ -65,18 +67,21 @@ import {
   Militar,
   ModalidadeSolicitacaoServico,
   RegistroPresenca,
+  SolicitacaoOperacao,
   SolicitacaoReforco,
   SolicitacaoRemanejamento,
   SolicitacaoServico,
   StatusRemanejamento,
   StatusSolicitacaoReforco,
   StatusSolicitacaoServico,
+  StatusVagaOperacao,
   StatusVagaVoluntaria,
   TipoEscalaServico,
   TipoReforco,
   Ubm,
   Usuario,
   VagaVoluntariaExtraordinaria,
+  VagaVoluntariaOperacao,
 } from '../types';
 
 interface AppContextData {
@@ -94,6 +99,8 @@ interface AppContextData {
   solicitacoesServico: SolicitacaoServico[];
   solicitacoesReforco: SolicitacaoReforco[];
   solicitacoesRemanejamento: SolicitacaoRemanejamento[];
+  solicitacoesOperacao: SolicitacaoOperacao[];
+  vagasVoluntariasOperacao: VagaVoluntariaOperacao[];
   escalasComando: EscalaComando[];
   fechamentosEscala: FechamentoEscala[];
   historicoEscalas: HistoricoEscala[];
@@ -216,6 +223,12 @@ interface AppContextData {
   }) => Promise<string>;
   /** Escalante/Comandante da UBM atende (empenha o militar) ou recusa. */
   responderSolicitacaoReforco: (id: string, decisao: { atender: boolean; militarId?: string }) => Promise<void>;
+  /** Reforço em massa (CRB/COP): distribui `quantidadeTotal` proporcionalmente entre as UBMs do comando, pelo efetivo ativo de cada uma. */
+  dispararSolicitacaoOperacao: (dados: { comandoId: string; motivo: string; data: string; prazo: string; quantidadeTotal: number }) => Promise<string>;
+  /** Escalante da UBM abre voluntariado pra própria cota (recebida em `SolicitacaoOperacao.cotas`). */
+  abrirVoluntariadoOperacaoUbm: (operacaoId: string) => Promise<string>;
+  voluntariarParaOperacao: (vagaId: string) => Promise<void>;
+  resolverOperacaoCompulsoriamente: (vagaId: string) => Promise<void>;
 
   marcarAlertaLida: (id: string) => Promise<void>;
   deleteAlerta: (id: string) => Promise<void>;
@@ -353,6 +366,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const presencas = useColecao<RegistroPresenca>('presencas', isAuthenticated);
   const solicitacoesServico = useColecao<SolicitacaoServico>('solicitacoes_servico', isAuthenticated);
   const solicitacoesRemanejamento = useColecao<SolicitacaoRemanejamento>('solicitacoes_remanejamento', isAuthenticated);
+  const solicitacoesOperacao = useColecao<SolicitacaoOperacao>('solicitacoes_operacao', isAuthenticated);
+  const vagasVoluntariasOperacao = useColecao<VagaVoluntariaOperacao>('vagas_voluntarias_operacao', isAuthenticated);
   const solicitacoesReforco = useColecao<SolicitacaoReforco>('solicitacoes_reforco', isAuthenticated);
   const escalasComando = useColecao<EscalaComando>('escalas_comando', isAuthenticated);
   const fechamentosEscala = useColecao<FechamentoEscala>('fechamentos_escala', isAuthenticated);
@@ -1613,6 +1628,270 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [solicitacoesReforco, comandos, usuarios, funcoes, escalasExtraordinarias, usuarioAtual, notificar],
   );
 
+  /**
+   * Reforço em massa: um único pedido do CRB/COP (ex.: 25 militares pra
+   * prevenção num jogo) que o sistema já reparte entre as UBMs subordinadas,
+   * proporcional ao efetivo ativo de cada uma (`distribuirProporcional`).
+   * Não cria vaga de voluntariado sozinho — cada UBM decide quando abrir a
+   * própria (`abrirVoluntariadoOperacaoUbm`).
+   */
+  const dispararSolicitacaoOperacao = useCallback(
+    async (dados: { comandoId: string; motivo: string; data: string; prazo: string; quantidadeTotal: number }) => {
+      const db = requireDb();
+      const comando = comandos.find((c) => c.id === dados.comandoId);
+      if (!comando) throw new Error('Comando não encontrado.');
+      if (dados.quantidadeTotal <= 0) throw new Error('Informe uma quantidade maior que zero.');
+
+      const pesos = comando.ubmIds.map((ubmId) => ({
+        id: ubmId,
+        peso: militares.filter((m) => m.ubmId === ubmId && m.ativo).length,
+      }));
+      const cotas = distribuirProporcional(dados.quantidadeTotal, pesos)
+        .filter((c) => c.quantidade > 0)
+        .map((c) => ({ ubmId: c.id, quantidade: c.quantidade }));
+      if (cotas.length === 0) {
+        throw new Error('Nenhuma UBM vinculada a este comando tem efetivo ativo pra receber cota.');
+      }
+
+      const ref = await addDoc(collection(db, 'solicitacoes_operacao'), {
+        comandoId: dados.comandoId,
+        motivo: dados.motivo,
+        data: dados.data,
+        prazo: dados.prazo,
+        quantidadeTotal: dados.quantidadeTotal,
+        cotas,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      await Promise.all(
+        cotas.map((cota) => {
+          const gestaoDaUbm = usuarios.filter(
+            (u) => u.ubmId === cota.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+          );
+          return Promise.all(
+            gestaoDaUbm.map((u) =>
+              notificar(
+                u.id,
+                'operacao_cota_recebida',
+                `Sua UBM recebeu cota de ${cota.quantidade} militar(es) para "${dados.motivo}" em ${dados.data}.`,
+                '/sistema/reforcos',
+              ),
+            ),
+          );
+        }),
+      );
+      return ref.id;
+    },
+    [comandos, militares, usuarios, usuarioAtual, notificar],
+  );
+
+  /** Escalante/comandante da UBM abre voluntariado pra própria cota — qualquer militar ativo é elegível (sem exigência de função). */
+  const abrirVoluntariadoOperacaoUbm = useCallback(
+    async (operacaoId: string) => {
+      const db = requireDb();
+      if (!usuarioAtual) throw new Error('Você precisa estar autenticado.');
+      const operacao = solicitacoesOperacao.find((o) => o.id === operacaoId);
+      if (!operacao) throw new Error('Solicitação de operação não encontrada.');
+      const ubmId = usuarioAtual.ubmId;
+      const cota = operacao.cotas.find((c) => c.ubmId === ubmId);
+      if (!cota) throw new Error('Sua UBM não recebeu cota nessa operação.');
+      const jaAberta = vagasVoluntariasOperacao.some((v) => v.operacaoId === operacaoId && v.ubmId === ubmId);
+      if (jaAberta) throw new Error('O voluntariado dessa cota já foi aberto.');
+
+      const elegiveis = militares.filter(
+        (m) => m.ubmId === ubmId && m.ativo && !estaAfastado(m.id, operacao.data, afastamentos),
+      );
+      if (elegiveis.length === 0) throw new Error('Nenhum militar ativo disponível nessa data pra abrir voluntariado.');
+
+      const ref = await addDoc(collection(db, 'vagas_voluntarias_operacao'), {
+        operacaoId,
+        ubmId,
+        comandoId: operacao.comandoId,
+        motivo: operacao.motivo,
+        data: operacao.data,
+        prazo: operacao.prazo,
+        quantidade: cota.quantidade,
+        status: 'aberta' as StatusVagaOperacao,
+        candidatosElegiveisIds: elegiveis.map((m) => m.id),
+        voluntariosIds: [],
+        criadoPorId: usuarioAtual.id,
+        criado_em: new Date().toISOString(),
+      });
+
+      const usuariosElegiveis = usuarios.filter((u) => u.militarId && elegiveis.some((m) => m.id === u.militarId));
+      await Promise.all(
+        usuariosElegiveis.map((u) =>
+          notificar(
+            u.id,
+            'vaga_operacao_disponivel',
+            `Reforço disponível pra voluntariado: ${cota.quantidade} vaga(s) para "${operacao.motivo}" em ${operacao.data}. Prazo: ${operacao.prazo}.`,
+            '/sistema/reforcos',
+          ),
+        ),
+      );
+      return ref.id;
+    },
+    [usuarioAtual, solicitacoesOperacao, vagasVoluntariasOperacao, militares, afastamentos, usuarios, notificar],
+  );
+
+  /**
+   * Voluntariado pra cota de operação — mesma lógica de ocupação imediata da
+   * vaga voluntária extraordinária (ver `voluntariarParaVaga`), mas sem
+   * checagem de função nem de teto mensal: é reforço tipo 'missao', com
+   * orçamento próprio.
+   */
+  const voluntariarParaOperacao = useCallback(
+    async (vagaId: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasOperacao.find((v) => v.id === vagaId);
+      const militarId = usuarioAtual?.militarId;
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (!militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
+      if (vaga.status !== 'aberta') throw new Error('Essa vaga já foi preenchida.');
+      if (vaga.voluntariosIds.length >= vaga.quantidade) throw new Error('Essa vaga já está completa.');
+      if (vaga.voluntariosIds.includes(militarId)) throw new Error('Você já se voluntariou pra essa vaga.');
+      if (!vaga.candidatosElegiveisIds.includes(militarId)) {
+        throw new Error('Você não está na lista de elegíveis pra essa vaga.');
+      }
+
+      const novosVoluntarios = [...vaga.voluntariosIds, militarId];
+      const novoStatus: StatusVagaOperacao = novosVoluntarios.length >= vaga.quantidade ? 'preenchida' : 'aberta';
+      try {
+        await updateDoc(doc(db, 'vagas_voluntarias_operacao', vagaId), {
+          status: novoStatus,
+          voluntariosIds: novosVoluntarios,
+        });
+      } catch {
+        throw new Error('Essa vaga já foi preenchida por outros voluntários.');
+      }
+
+      const comando = comandos.find((c) => c.id === vaga.comandoId);
+      await addDoc(collection(db, 'afastamentos'), {
+        militarId,
+        ubmId: vaga.ubmId,
+        motivo: 'missao_externa',
+        detalhe: `${comando ? `${comando.sigla} — ` : ''}${vaga.motivo}`,
+        dataInicio: vaga.data,
+        dataFim: vaga.data,
+        origemOperacaoVagaId: vagaId,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      await addDoc(collection(db, 'escalas_comando'), {
+        comandoId: vaga.comandoId,
+        militarId,
+        ubmOrigemId: vaga.ubmId,
+        funcaoNome: 'Reforço de operação',
+        data: vaga.data,
+        motivo: vaga.motivo,
+        origemOperacaoVagaId: vagaId,
+        criado_em: new Date().toISOString(),
+      });
+
+      const dataBr = formatarDataBr(vaga.data);
+      await notificarMilitarEscalado(
+        militarId,
+        `Você se voluntariou e foi confirmado pra "${vaga.motivo}" em ${dataBr}.`,
+        'Você foi escalado — GESOP',
+        `<p>Você se voluntariou e foi confirmado(a) pra <b>${vaga.motivo}</b> em <b>${dataBr}</b>.</p>`,
+      );
+      if (novoStatus === 'preenchida') {
+        const gestaoDaUbm = usuarios.filter(
+          (u) => u.ubmId === vaga.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+        );
+        await Promise.all(
+          gestaoDaUbm.map((u) =>
+            notificar(
+              u.id,
+              'vaga_operacao_resolvida',
+              `A cota de "${vaga.motivo}" em ${vaga.data} foi totalmente preenchida por voluntariado.`,
+              '/sistema/reforcos',
+            ),
+          ),
+        );
+      }
+    },
+    [vagasVoluntariasOperacao, usuarios, comandos, usuarioAtual, notificar, notificarMilitarEscalado],
+  );
+
+  /** Prazo esgotado com posições sobrando: completa compulsoriamente priorizando quem tem menos reforços/missões recentes (fila de fairness simples, sem exigência de função). */
+  const resolverOperacaoCompulsoriamente = useCallback(
+    async (vagaId: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasOperacao.find((v) => v.id === vagaId);
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (vaga.status !== 'aberta') throw new Error('Essa vaga já foi resolvida.');
+
+      const faltam = vaga.quantidade - vaga.voluntariosIds.length;
+      if (faltam <= 0) throw new Error('Essa vaga já está completa.');
+
+      const contagemReforcos = new Map<string, number>();
+      afastamentos.forEach((a) => {
+        if (a.motivo === 'missao_externa' || a.motivo === 'reforco_crb_cop') {
+          contagemReforcos.set(a.militarId, (contagemReforcos.get(a.militarId) ?? 0) + 1);
+        }
+      });
+
+      const elegiveis = vaga.candidatosElegiveisIds
+        .filter((id) => !vaga.voluntariosIds.includes(id) && !estaAfastado(id, vaga.data, afastamentos))
+        .map((id) => militares.find((m) => m.id === id))
+        .filter((m): m is Militar => !!m)
+        .sort((a, b) => {
+          const diferenca = (contagemReforcos.get(a.id) ?? 0) - (contagemReforcos.get(b.id) ?? 0);
+          if (diferenca !== 0) return diferenca;
+          return a.nome.localeCompare(b.nome);
+        });
+
+      const escolhidos = elegiveis.slice(0, faltam);
+      if (escolhidos.length < faltam) {
+        throw new Error('Não há militares elegíveis suficientes pra completar essa cota compulsoriamente.');
+      }
+
+      await updateDoc(doc(db, 'vagas_voluntarias_operacao', vagaId), {
+        status: 'expirada_compulsoria' as StatusVagaOperacao,
+        militaresCompulsoriosIds: escolhidos.map((m) => m.id),
+        resolvido_em: new Date().toISOString(),
+      });
+
+      const comando = comandos.find((c) => c.id === vaga.comandoId);
+      const dataBr = formatarDataBr(vaga.data);
+      await Promise.all(
+        escolhidos.map(async (m) => {
+          await addDoc(collection(db, 'afastamentos'), {
+            militarId: m.id,
+            ubmId: vaga.ubmId,
+            motivo: 'missao_externa',
+            detalhe: `${comando ? `${comando.sigla} — ` : ''}${vaga.motivo}`,
+            dataInicio: vaga.data,
+            dataFim: vaga.data,
+            origemOperacaoVagaId: vagaId,
+            criadoPorId: usuarioAtual?.id ?? '',
+            criado_em: new Date().toISOString(),
+          });
+          await addDoc(collection(db, 'escalas_comando'), {
+            comandoId: vaga.comandoId,
+            militarId: m.id,
+            ubmOrigemId: vaga.ubmId,
+            funcaoNome: 'Reforço de operação',
+            data: vaga.data,
+            motivo: vaga.motivo,
+            origemOperacaoVagaId: vagaId,
+            criado_em: new Date().toISOString(),
+          });
+          await notificarMilitarEscalado(
+            m.id,
+            `Ninguém se voluntariou a tempo — você foi escalado compulsoriamente pra "${vaga.motivo}" em ${dataBr}.`,
+            'Você foi escalado — GESOP',
+            `<p>Ninguém se voluntariou a tempo — você foi escalado(a) compulsoriamente pra <b>${vaga.motivo}</b> em <b>${dataBr}</b>.</p>`,
+          );
+        }),
+      );
+    },
+    [vagasVoluntariasOperacao, militares, afastamentos, comandos, usuarioAtual, notificarMilitarEscalado],
+  );
+
   // --- Escala diferenciada ---------------------------------------------------
   const criarEscalaDiferenciada = useCallback(
     async (dados: { militarId: string; ubmId: string; funcao: string; data: string; observacao?: string }) => {
@@ -1953,6 +2232,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       solicitacoesServico,
       solicitacoesReforco,
       solicitacoesRemanejamento,
+      solicitacoesOperacao,
+      vagasVoluntariasOperacao,
       escalasComando,
       fechamentosEscala,
       historicoEscalas,
@@ -2013,6 +2294,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       responderSolicitacaoAprovador,
       criarSolicitacaoReforco,
       responderSolicitacaoReforco,
+      dispararSolicitacaoOperacao,
+      abrirVoluntariadoOperacaoUbm,
+      voluntariarParaOperacao,
+      resolverOperacaoCompulsoriamente,
       marcarAlertaLida,
       deleteAlerta,
     }),
@@ -2031,6 +2316,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       solicitacoesServico,
       solicitacoesReforco,
       solicitacoesRemanejamento,
+      solicitacoesOperacao,
+      vagasVoluntariasOperacao,
       escalasComando,
       fechamentosEscala,
       historicoEscalas,
@@ -2090,6 +2377,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       responderSolicitacaoAprovador,
       criarSolicitacaoReforco,
       responderSolicitacaoReforco,
+      dispararSolicitacaoOperacao,
+      abrirVoluntariadoOperacaoUbm,
+      voluntariarParaOperacao,
+      resolverOperacaoCompulsoriamente,
       marcarAlertaLida,
       deleteAlerta,
     ],
