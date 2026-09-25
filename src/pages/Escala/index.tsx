@@ -507,6 +507,7 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
     deleteEscalaExtraordinaria,
     dispararVagaVoluntariaExtraordinaria,
     voluntariarParaVaga,
+    desistirVoluntariadoExtraordinaria,
     resolverVagaCompulsoriamente,
   } = useApp();
   const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
@@ -536,7 +537,9 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
   const vagasDaUbm = vagasVoluntariasExtraordinarias
     .filter((v) => v.ubmId === ubmId)
     .sort((a, b) => b.criado_em.localeCompare(a.criado_em));
-  const vagasAbertas = vagasDaUbm.filter((v) => v.status === 'aberta');
+  const vagasAbertas = vagasDaUbm.filter(
+    (v) => v.status === 'aberta' || (!!meuMilitarId && v.voluntariosIds.includes(meuMilitarId)),
+  );
   const vagasResolvidas = vagasDaUbm.filter((v) => v.status !== 'aberta').slice(0, 15);
 
   const handleCriar = async (e: FormEvent) => {
@@ -571,6 +574,18 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
       await voluntariarParaVaga(vagaId);
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível se voluntariar pra essa vaga.');
+    } finally {
+      setProcessandoVagaId(null);
+    }
+  };
+
+  const handleDesistir = async (vagaId: string) => {
+    if (!confirm('Desistir desse voluntariado? A vaga volta a ficar aberta pra outros militares.')) return;
+    setProcessandoVagaId(vagaId);
+    try {
+      await desistirVoluntariadoExtraordinaria(vagaId);
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível desistir.');
     } finally {
       setProcessandoVagaId(null);
     }
@@ -721,7 +736,18 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
                         Prazo esgotado — completar compulsoriamente
                       </button>
                     )}
-                    {jaVoluntariado && <span className="text-xs text-emerald-700 font-medium">Você já se voluntariou</span>}
+                    {jaVoluntariado && v.status !== 'expirada_compulsoria' && (
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="text-xs text-emerald-700 font-medium">Você já se voluntariou</span>
+                        <button
+                          onClick={() => handleDesistir(v.id)}
+                          disabled={processandoVagaId === v.id}
+                          className="text-xs font-medium text-gray-500 hover:text-gray-700 underline disabled:opacity-50"
+                        >
+                          Desistir
+                        </button>
+                      </div>
+                    )}
                     {!souElegivel && !jaVoluntariado && !isEscalante && (
                       <span className="text-xs text-gray-400">Aguardando voluntário</span>
                     )}

@@ -179,6 +179,7 @@ interface AppContextData {
   deleteEscalaExtraordinaria: (id: string) => Promise<void>;
   dispararVagaVoluntariaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; prazo: string; quantidade: number }) => Promise<string>;
   voluntariarParaVaga: (vagaId: string) => Promise<void>;
+  desistirVoluntariadoExtraordinaria: (vagaId: string) => Promise<void>;
   resolverVagaCompulsoriamente: (vagaId: string) => Promise<void>;
 
   /** Só o escalante cadastra — cria o registro e já espelha em EscalaOrdinaria (origem 'diferenciada'). */
@@ -1442,6 +1443,52 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   /**
+   * Militar desiste de um voluntariado de escala extraordinária antes da
+   * resolução final — mesma lógica de `desistirVoluntariadoOperacao`: reabre
+   * a vaga (mesmo se já 'preenchida') e remove só o próprio registro. Não é
+   * mais possível depois de resolvida compulsoriamente.
+   */
+  const desistirVoluntariadoExtraordinaria = useCallback(
+    async (vagaId: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasExtraordinarias.find((v) => v.id === vagaId);
+      const militarId = usuarioAtual?.militarId;
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (!militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
+      if (!vaga.voluntariosIds.includes(militarId)) throw new Error('Você não é voluntário dessa vaga.');
+      if (vaga.status === 'expirada_compulsoria') {
+        throw new Error('Essa vaga já foi resolvida compulsoriamente — não é mais possível desistir por aqui.');
+      }
+
+      await updateDoc(doc(db, 'vagas_voluntarias_extraordinarias', vagaId), {
+        status: 'aberta' as StatusVagaVoluntaria,
+        voluntariosIds: vaga.voluntariosIds.filter((id) => id !== militarId),
+      });
+
+      const escalaPropria = escalasExtraordinarias.find((e) => e.militarId === militarId && e.vagaVoluntariaId === vagaId);
+      if (escalaPropria) {
+        await deleteDoc(doc(db, 'escalas_extraordinarias', escalaPropria.id));
+      }
+
+      const funcaoNome = funcoes.find((f) => f.id === vaga.funcao)?.nome ?? 'Função removida';
+      const gestaoDaUbm = usuarios.filter(
+        (u) => u.ubmId === vaga.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+      );
+      await Promise.all(
+        gestaoDaUbm.map((u) =>
+          notificar(
+            u.id,
+            'vaga_voluntaria_disponivel',
+            `Um voluntário desistiu de ${funcaoNome} em ${vaga.data} — a vaga reabriu.`,
+            '/sistema/escala',
+          ),
+        ),
+      );
+    },
+    [vagasVoluntariasExtraordinarias, escalasExtraordinarias, funcoes, usuarios, usuarioAtual, notificar],
+  );
+
+  /**
    * Prazo esgotado com posições sobrando: o escalante completa
    * compulsoriamente as vagas que faltam — mesmo motor de equidade de
    * sempre (menos serviços primeiro; empatados em folga, desempata por
@@ -1605,12 +1652,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
         const usuarioMilitar = usuarios.find((u) => u.militarId === militarFinal);
         if (usuarioMilitar) {
+          const dataBr = formatarDataBr(solicitacao.data);
           await notificar(
             usuarioMilitar.id,
             'reforco_atendido',
-            'Você foi empenhado num reforço solicitado pelo CRB/COP.',
+            `Você foi empenhado num reforço solicitado pelo CRB/COP para ${dataBr}.`,
             '/sistema/afastamentos',
           );
+          try {
+            await enviarEmail({
+              to: usuarioMilitar.email,
+              subject: 'Você foi escalado para um reforço — GESOP',
+              html: `<p>Você foi empenhado(a) num reforço solicitado pelo CRB/COP — <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+            });
+          } catch (erroEnvio) {
+            console.error('Erro ao enviar e-mail de reforço atendido:', erroEnvio);
+          }
         }
       } else {
         await updateDoc(doc(db, 'solicitacoes_reforco', id), {
@@ -2339,6 +2396,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteEscalaExtraordinaria,
       dispararVagaVoluntariaExtraordinaria,
       voluntariarParaVaga,
+      desistirVoluntariadoExtraordinaria,
       resolverVagaCompulsoriamente,
       criarEscalaDiferenciada,
       atualizarEscalaDiferenciada,
@@ -2423,6 +2481,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteEscalaExtraordinaria,
       dispararVagaVoluntariaExtraordinaria,
       voluntariarParaVaga,
+      desistirVoluntariadoExtraordinaria,
       resolverVagaCompulsoriamente,
       criarEscalaDiferenciada,
       atualizarEscalaDiferenciada,

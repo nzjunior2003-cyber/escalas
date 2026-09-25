@@ -190,7 +190,14 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/vagas_voluntarias_extraordinarias/$(request.resource.data.vagaVoluntariaId)).data.voluntariosIds.hasAny([perfilDoc().militarId])
           && get(/databases/$(database)/documents/vagas_voluntarias_extraordinarias/$(request.resource.data.vagaVoluntariaId)).data.ubmId == request.resource.data.ubmId
         );
-      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
+      allow update: if podeGerenciarUbm(resource.data.ubmId);
+      // Desistência do próprio voluntariado (ver desistirVoluntariadoExtraordinaria).
+      allow delete: if podeGerenciarUbm(resource.data.ubmId)
+        || (
+          ativo()
+          && 'vagaVoluntariaId' in resource.data
+          && resource.data.militarId == perfilDoc().militarId
+        );
     }
     // Vaga voluntária de extraordinária (ver nota em types.ts): o escalante
     // dispara (podendo pedir mais de um militar, campo `quantidade`);
@@ -213,6 +220,19 @@ service cloud.firestore {
           && request.resource.data.voluntariosIds.size() <= resource.data.quantidade
           && request.resource.data.voluntariosIds.hasAll(resource.data.voluntariosIds)
           && request.resource.data.voluntariosIds.hasAny([perfilDoc().militarId])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'voluntariosIds'])
+        )
+        // Desistência (ver desistirVoluntariadoExtraordinaria): o próprio
+        // voluntário se remove, mesmo se a vaga já estava 'preenchida' —
+        // só não depois de resolvida compulsoriamente.
+        || (
+          ativo()
+          && resource.data.status != 'expirada_compulsoria'
+          && resource.data.voluntariosIds.hasAny([perfilDoc().militarId])
+          && request.resource.data.status == 'aberta'
+          && request.resource.data.voluntariosIds.size() == resource.data.voluntariosIds.size() - 1
+          && resource.data.voluntariosIds.hasAll(request.resource.data.voluntariosIds)
+          && !request.resource.data.voluntariosIds.hasAny([perfilDoc().militarId])
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'voluntariosIds'])
         );
       allow delete: if master();
