@@ -647,6 +647,7 @@ export type TipoAlerta =
   | 'alteracao_diferenciada'
   | 'solicitacao_reforco'
   | 'reforco_atendido'
+  | 'reforco_previa'
   | 'vaga_voluntaria_disponivel'
   | 'vaga_voluntaria_resolvida'
   | 'militar_nao_encontrado_na_planilha'

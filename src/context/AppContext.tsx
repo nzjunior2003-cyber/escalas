@@ -1582,9 +1582,28 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           notificar(a.id, 'solicitacao_reforco', 'Chegou uma solicitação de reforço de militar pra sua UBM.', '/sistema/reforcos'),
         ),
       );
+
+      // Prévia: o sugerido é avisado (só alerta interno, sem e-mail — ainda
+      // não é definitivo) assim que a solicitação chega, pra já poder se
+      // organizar. Vira confirmação (alerta+e-mail) ou "saiu da prévia"
+      // (alerta+e-mail) quando o escalante responder — ver
+      // `responderSolicitacaoReforco`.
+      if (sugerido) {
+        const usuarioSugerido = usuarios.find((u) => u.militarId === sugerido.id);
+        if (usuarioSugerido) {
+          const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'Função removida';
+          const dataBr = formatarDataBr(dados.data);
+          await notificar(
+            usuarioSugerido.id,
+            'reforco_previa',
+            `Você é o(a) sugerido(a) pra um possível reforço do CRB/COP — ${funcaoNome} em ${dataBr}. Ainda não confirmado; fique de sobreaviso.`,
+            '/sistema/reforcos',
+          );
+        }
+      }
       return ref.id;
     },
-    [militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarios, usuarioAtual, notificar],
+    [militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
   );
 
   /**
@@ -1604,8 +1623,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const solicitacao = solicitacoesReforco.find((s) => s.id === id);
       if (!solicitacao) throw new Error('Solicitação de reforço não encontrada.');
 
+      const militarFinalId = decisao.atender ? decisao.militarId ?? solicitacao.militarSugeridoId : undefined;
+
       if (decisao.atender) {
-        const militarFinal = decisao.militarId ?? solicitacao.militarSugeridoId;
+        const militarFinal = militarFinalId;
         if (!militarFinal) throw new Error('Nenhum militar selecionado pra atender essa solicitação.');
         if (
           solicitacao.tipo === 'escala_extraordinaria' &&
@@ -1675,6 +1696,34 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           atendidoPorId: usuarioAtual?.id ?? '',
           atendido_em: new Date().toISOString(),
         });
+      }
+
+      // Saiu da prévia: o sugerido original tinha recebido o aviso de
+      // sobreaviso na criação (ver criarSolicitacaoReforco) — se no fim não
+      // foi ele o confirmado (outro militar foi escolhido, ou a solicitação
+      // foi recusada), avisa por alerta E e-mail, já que não vale mais a
+      // pena ele se organizar pra esse reforço.
+      if (solicitacao.militarSugeridoId && solicitacao.militarSugeridoId !== militarFinalId) {
+        const usuarioSugeridoOriginal = usuarios.find((u) => u.militarId === solicitacao.militarSugeridoId);
+        if (usuarioSugeridoOriginal) {
+          const funcaoNome = funcoes.find((f) => f.id === solicitacao.funcao)?.nome ?? 'Função removida';
+          const dataBr = formatarDataBr(solicitacao.data);
+          await notificar(
+            usuarioSugeridoOriginal.id,
+            'reforco_previa',
+            `Você não foi mais o(a) escolhido(a) pro reforço de ${funcaoNome} em ${dataBr} — outro militar foi escalado ou a solicitação foi recusada.`,
+            '/sistema/reforcos',
+          );
+          try {
+            await enviarEmail({
+              to: usuarioSugeridoOriginal.email,
+              subject: 'Você saiu da prévia de um reforço — GESOP',
+              html: `<p>Você havia sido sugerido(a) pro reforço de <b>${funcaoNome}</b> em <b>${dataBr}</b>, mas não foi o(a) confirmado(a) — outro militar foi escalado ou a solicitação foi recusada.</p>`,
+            });
+          } catch (erroEnvio) {
+            console.error('Erro ao enviar e-mail de saída da prévia de reforço:', erroEnvio);
+          }
+        }
       }
 
       const comandoUsuarios = usuarios.filter(
