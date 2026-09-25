@@ -1754,6 +1754,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (!vaga.candidatosElegiveisIds.includes(militarId)) {
         throw new Error('Você não está na lista de elegíveis pra essa vaga.');
       }
+      // Reconfere no momento do voluntariado (não só quando a vaga abriu):
+      // evita dupla marcação de quem, entre a abertura desta vaga e agora,
+      // já se comprometeu com outra escala/missão na mesma data (inclusive
+      // outra operação concorrente).
+      if (estaAfastado(militarId, vaga.data, afastamentos)) {
+        throw new Error('Você já está afastado ou comprometido com outra escala/missão nessa data.');
+      }
 
       const novosVoluntarios = [...vaga.voluntariosIds, militarId];
       const novoStatus: StatusVagaOperacao = novosVoluntarios.length >= vaga.quantidade ? 'preenchida' : 'aberta';
@@ -1813,7 +1820,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         );
       }
     },
-    [vagasVoluntariasOperacao, usuarios, comandos, usuarioAtual, notificar, notificarMilitarEscalado],
+    [vagasVoluntariasOperacao, afastamentos, usuarios, comandos, usuarioAtual, notificar, notificarMilitarEscalado],
   );
 
   /** Prazo esgotado com posições sobrando: completa compulsoriamente priorizando quem tem menos reforços/missões recentes (fila de fairness simples, sem exigência de função). */
