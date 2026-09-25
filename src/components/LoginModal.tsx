@@ -52,6 +52,9 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
   const [cadastroSenha, setCadastroSenha] = useState('');
   const [cadastroConfirmSenha, setCadastroConfirmSenha] = useState('');
 
+  // Consentimento de uso de dados (LGPD) — exigido nos dois fluxos de cadastro.
+  const [aceitouPrivacidade, setAceitouPrivacidade] = useState(false);
+
   const trocarView = (nova: ModalView) => {
     setErro(null);
     setView(nova);
@@ -64,6 +67,7 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
     setCadastroEmail('');
     setCadastroSenha('');
     setCadastroConfirmSenha('');
+    setAceitouPrivacidade(false);
     trocarView('completarCadastro');
   };
 
@@ -75,6 +79,7 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
     setUbmId(ubms[0]?.id ?? '');
     setNewSenha('');
     setConfirmSenha('');
+    setAceitouPrivacidade(false);
     trocarView('naoEncontrado');
   };
 
@@ -163,6 +168,10 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
       setErro('Selecione a UBM à qual você pertence.');
       return;
     }
+    if (!aceitouPrivacidade) {
+      setErro('É preciso concordar com o uso dos seus dados para continuar.');
+      return;
+    }
 
     setAguardando(true);
     try {
@@ -210,6 +219,10 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
       setErro('As senhas não coincidem.');
       return;
     }
+    if (!aceitouPrivacidade) {
+      setErro('É preciso concordar com o uso dos seus dados para continuar.');
+      return;
+    }
 
     setAguardando(true);
     try {
@@ -254,6 +267,26 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
 
   const classeBotaoPrimario =
     'w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+
+  // Aviso de privacidade (LGPD) — exigido nos dois fluxos de cadastro, antes de enviar.
+  const avisoPrivacidade = (
+    <div className="rounded-md border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/50 p-3 space-y-2">
+      <p className="text-xs text-gray-600 dark:text-slate-400 leading-relaxed">
+        Os dados informados aqui (nome, matrícula, posto, e-mail e UBM) e os registros de escala vinculados à sua
+        conta (serviços, afastamentos e substituições) são usados exclusivamente para a gestão da escala de serviço
+        do CBMPA, e ficam visíveis apenas ao Comandante/Escalante da sua UBM e ao master do sistema.
+      </p>
+      <label className="flex items-start gap-2 text-xs text-gray-700 dark:text-slate-300 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={aceitouPrivacidade}
+          onChange={(e) => setAceitouPrivacidade(e.target.checked)}
+          className="mt-0.5 h-4 w-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+        />
+        <span>Li e concordo com o uso dos meus dados para essa finalidade.</span>
+      </label>
+    </div>
+  );
 
   const conteudo = (
     <div className={embedded ? 'bg-white dark:bg-slate-900 rounded-xl w-full' : 'bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] overflow-y-auto'}>
@@ -364,7 +397,9 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
               <FormField label="Confirmar Senha" icon={Lock} type="password" showToggle required minLength={6} value={cadastroConfirmSenha} onChange={(e) => setCadastroConfirmSenha(e.target.value)} placeholder="••••••" />
             </div>
 
-            <button type="submit" disabled={aguardando} className={`${classeBotaoPrimario} mt-2`}>
+            {avisoPrivacidade}
+
+            <button type="submit" disabled={aguardando || !aceitouPrivacidade} className={`${classeBotaoPrimario} mt-2`}>
               {aguardando ? 'Enviando...' : 'Concluir Cadastro'}
             </button>
             <div className="text-center mt-2">
@@ -431,9 +466,11 @@ export default function LoginModal({ onClose, embedded }: { onClose: () => void;
               <FormField label="Confirmar Senha" icon={Lock} type="password" required minLength={6} value={confirmSenha} onChange={(e) => setConfirmSenha(e.target.value)} placeholder="••••••" />
             </div>
 
+            {avisoPrivacidade}
+
             <button
               type="submit"
-              disabled={aguardando}
+              disabled={aguardando || !aceitouPrivacidade}
               className={`${classeBotaoPrimario} mt-2`}
             >
               {aguardando ? 'Enviando...' : 'Enviar Solicitação'}
