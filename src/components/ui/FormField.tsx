@@ -16,17 +16,17 @@ export default function FormField({ label, icon: Icon, showToggle = false, type,
 
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">{label}</label>
       <div className="relative">
         {Icon && (
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Icon className="h-5 w-5 text-gray-400" />
+            <Icon className="h-5 w-5 text-gray-400 dark:text-slate-500" />
           </div>
         )}
         <input
           {...props}
           type={tipoEfetivo}
-          className={`block w-full ${Icon ? 'pl-10' : ''} ${isPasswordToggle ? 'pr-10' : ''} px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 ${className}`}
+          className={`block w-full ${Icon ? 'pl-10' : ''} ${isPasswordToggle ? 'pr-10' : ''} px-3 py-2 border border-gray-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 ${className}`}
         />
         {isPasswordToggle && (
           <button
@@ -34,7 +34,7 @@ export default function FormField({ label, icon: Icon, showToggle = false, type,
             onClick={() => setSenhaVisivel((v) => !v)}
             tabIndex={-1}
             aria-label={senhaVisivel ? 'Ocultar senha' : 'Mostrar senha'}
-            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300"
           >
             {senhaVisivel ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
           </button>

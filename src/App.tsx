@@ -6,15 +6,20 @@ import ProtectedRoute from './components/ProtectedRoute';
 import PublicHome from './pages/PublicHome';
 import SistemaHome from './pages/SistemaHome';
 import Efetivo from './pages/Efetivo';
+import Funcoes from './pages/Funcoes';
 import Escala from './pages/Escala';
 import Solicitacoes from './pages/Solicitacoes';
 import Afastamentos from './pages/Afastamentos';
 import Presenca from './pages/Presenca';
-import Relatorios from './pages/Relatorios';
-import ImpressaoEscala from './pages/Relatorios/ImpressaoEscala';
+import Historico from './pages/Historico';
 import Estatisticas from './pages/Estatisticas';
 import Usuarios from './pages/Usuarios';
+import Ubms from './pages/Ubms';
+import Comandos from './pages/Comandos';
+import Reforcos from './pages/Reforcos';
+import PainelRegional from './pages/PainelRegional';
 import Alertas from './pages/Alertas';
+import MeuPerfil from './pages/MeuPerfil';
 
 export default function App() {
   return (
@@ -25,20 +30,23 @@ export default function App() {
             <Route path="/" element={<PublicHome />} />
 
             <Route path="/sistema" element={<ProtectedRoute />}>
-              {/* Sem o Layout (sidebar/topo) — pensada pra impressão limpa. */}
-              <Route path="relatorios/imprimir" element={<ImpressaoEscala />} />
-
               <Route element={<Layout />}>
                 <Route index element={<SistemaHome />} />
                 <Route path="efetivo" element={<Efetivo />} />
+                <Route path="funcoes" element={<Funcoes />} />
                 <Route path="escala" element={<Escala />} />
                 <Route path="solicitacoes" element={<Solicitacoes />} />
                 <Route path="afastamentos" element={<Afastamentos />} />
                 <Route path="presenca" element={<Presenca />} />
-                <Route path="relatorios" element={<Relatorios />} />
+                <Route path="historico" element={<Historico />} />
                 <Route path="estatisticas" element={<Estatisticas />} />
                 <Route path="usuarios" element={<Usuarios />} />
+                <Route path="ubms" element={<Ubms />} />
+                <Route path="comandos" element={<Comandos />} />
+                <Route path="reforcos" element={<Reforcos />} />
+                <Route path="painel-regional" element={<PainelRegional />} />
                 <Route path="alertas" element={<Alertas />} />
+                <Route path="meu-perfil" element={<MeuPerfil />} />
               </Route>
             </Route>
           </Routes>

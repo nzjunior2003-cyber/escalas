@@ -17,8 +17,10 @@ import {
 } from 'firebase/auth';
 import {
   addDoc,
+  arrayUnion,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -39,37 +41,72 @@ import {
   requireFirebaseAuth,
 } from '../lib/firebase';
 import { enviarEmail } from '../lib/emailService';
-import { gerarEscalaOrdinaria, sugerirMilitarExtraordinario } from '../lib/escala';
+import { enviarPush } from '../lib/pushService';
+import {
+  LIMITE_EXTRAORDINARIAS_POR_MES,
+  distribuirProporcional,
+  estaAfastado,
+  extraordinariasNoMes,
+  gerarEscalaOrdinariaUbm,
+  ordenarCandidatosExtraordinario,
+  sugerirMilitarExtraordinario,
+  temFolga24hAntes,
+} from '../lib/escala';
+import { buscarMilitarPorMatricula, buscarMilitaresPorNome, normalizarMatricula } from '../lib/planilhaEfetivo';
+import { ativarNotificacoesPush } from '../lib/pushNotifications';
 import type { LinhaMilitar } from '../lib/csvMilitares';
 import {
   Afastamento,
   Alerta,
+  Comando,
   EscalaDiferenciada,
   EscalaExtraordinaria,
   EscalaOrdinaria,
-  FuncaoOperacional,
+  FUNCOES_PADRAO,
+  FuncaoUbm,
+  EscalaComando,
+  FechamentoEscala,
+  HistoricoEscala,
   Militar,
+  ModalidadeSolicitacaoServico,
   RegistroPresenca,
-  SolicitacaoAlteracaoDiferenciada,
+  SolicitacaoOperacao,
+  SolicitacaoReforco,
+  SolicitacaoRemanejamento,
   SolicitacaoServico,
+  StatusRemanejamento,
+  StatusSolicitacaoReforco,
   StatusSolicitacaoServico,
+  StatusVagaOperacao,
+  StatusVagaVoluntaria,
   TipoEscalaServico,
-  TipoSolicitacaoServico,
+  TipoReforco,
   Ubm,
   Usuario,
+  VagaVoluntariaExtraordinaria,
+  VagaVoluntariaOperacao,
 } from '../types';
 
 interface AppContextData {
   ubms: Ubm[];
+  comandos: Comando[];
   usuarios: Usuario[];
   militares: Militar[];
+  funcoes: FuncaoUbm[];
   escalasOrdinarias: EscalaOrdinaria[];
   escalasExtraordinarias: EscalaExtraordinaria[];
   escalasDiferenciadas: EscalaDiferenciada[];
-  solicitacoesAlteracaoDiferenciada: SolicitacaoAlteracaoDiferenciada[];
+  vagasVoluntariasExtraordinarias: VagaVoluntariaExtraordinaria[];
   afastamentos: Afastamento[];
   presencas: RegistroPresenca[];
   solicitacoesServico: SolicitacaoServico[];
+  solicitacoesReforco: SolicitacaoReforco[];
+  solicitacoesRemanejamento: SolicitacaoRemanejamento[];
+  solicitacoesOperacao: SolicitacaoOperacao[];
+  vagasVoluntariasOperacao: VagaVoluntariaOperacao[];
+  escalasComando: EscalaComando[];
+  fechamentosEscala: FechamentoEscala[];
+  historicoEscalas: HistoricoEscala[];
   alertas: Alerta[];
 
   usuarioAtual: Usuario | null;
@@ -77,13 +114,48 @@ interface AppContextData {
   carregandoAuth: boolean;
   firebaseConfigurado: boolean;
 
-  login: (email: string, senha?: string) => Promise<void>;
+  /** `identificador` aceita e-mail ou matrícula (resolvida via coleção `matriculas`). */
+  login: (identificador: string, senha?: string) => Promise<void>;
   logout: () => Promise<void>;
-  solicitarAcesso: (dados: { nome: string; email: string; senha: string; ubmId: string; cargo?: string }) => Promise<void>;
+  solicitarAcesso: (dados: {
+    nome: string;
+    nomeGuerra?: string;
+    matricula?: string;
+    email: string;
+    senha: string;
+    ubmId: string;
+    cargo?: string;
+    naoEncontradoNaPlanilha?: boolean;
+  }) => Promise<void>;
   enviarResetSenha: (email: string) => Promise<void>;
+  /** Autoedição do próprio perfil — só o nome de guerra da conta (não altera o cadastro de efetivo). */
+  atualizarMeuPerfil: (dados: { nomeGuerra: string }) => Promise<void>;
+  /** Pede permissão de notificação push neste dispositivo; `false` se negada/indisponível (nunca lança por isso). */
+  ativarNotificacoesPushNoDispositivo: () => Promise<boolean>;
+  solicitarRemanejamentoFuncao: (dados: { funcaoDesejadaId: string; motivo: string }) => Promise<void>;
+  responderRemanejamento: (id: string, aprovado: boolean) => Promise<void>;
+  /** Confere a matrícula contra a planilha ao vivo do efetivo do CBMPA. */
+  validarMatriculaEfetivo: (matricula: string) => Promise<LinhaMilitar | null>;
+  buscarMilitaresEfetivoPorNome: (nome: string) => Promise<LinhaMilitar[]>;
+  /** Completa o primeiro acesso de um militar já validado pela matrícula. */
+  primeiroAcessoPorMatricula: (dados: {
+    matricula: string;
+    nomeCompleto: string;
+    cargo?: string;
+    nomeGuerra: string;
+    email: string;
+    senha: string;
+    ubmId: string;
+  }) => Promise<{ autoVinculado: boolean }>;
 
   addUbm: (dados: Omit<Ubm, 'id'>) => Promise<string>;
   updateUbm: (id: string, dados: Partial<Ubm>) => Promise<void>;
+
+  /** Cadastro de Comandos (CRB/COP) — exclusivo do master. */
+  addComando: (dados: Omit<Comando, 'id'>) => Promise<string>;
+  updateComando: (id: string, dados: Partial<Comando>) => Promise<void>;
+  deleteComando: (id: string) => Promise<void>;
+  vincularUbmAoComando: (ubmId: string, novoComandoId: string | null) => Promise<void>;
 
   updateUsuario: (id: string, dados: Partial<Usuario>) => Promise<void>;
   addUsuario: (dados: Omit<Usuario, 'id' | 'criado_em'> & { senha: string }) => Promise<void>;
@@ -95,44 +167,131 @@ interface AppContextData {
   transferirMilitarDeUbm: (militarId: string, novaUbmId: string) => Promise<void>;
   deleteMilitar: (id: string) => Promise<void>;
 
-  gerarEPersistirEscalaOrdinaria: (params: { ubmId: string; funcao: FuncaoOperacional; dataInicio: string; dataFim: string }) => Promise<number>;
+  /** Cadastro de funções operacionais da própria UBM (escalante/comandante). */
+  addFuncao: (dados: { ubmId: string; nome: string }) => Promise<string>;
+  updateFuncao: (id: string, dados: Partial<Pick<FuncaoUbm, 'nome' | 'ativa'>>) => Promise<void>;
+  deleteFuncao: (id: string) => Promise<void>;
+  moverOrdemFuncao: (ubmId: string, funcaoId: string, direcao: 'cima' | 'baixo') => Promise<void>;
+
+  gerarEPersistirEscalaOrdinaria: (params: { ubmId: string; dataInicio: string; dataFim: string }) => Promise<number>;
   updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
+  moverDataEscalaOrdinaria: (id: string, novaData: string) => Promise<void>;
+  adicionarEscalaOrdinaria: (dados: { ubmId: string; funcao: string; data: string; militarId: string }) => Promise<void>;
   deleteEscalaOrdinaria: (id: string) => Promise<void>;
 
-  criarEscalaExtraordinaria: (dados: { ubmId: string; funcao: FuncaoOperacional; data: string; motivo: string; militarIdEscolhido?: string }) => Promise<string>;
+  criarEscalaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; militarIdEscolhido?: string }) => Promise<string>;
   alterarMilitarExtraordinaria: (id: string, militarId: string) => Promise<void>;
+  deleteEscalaExtraordinaria: (id: string) => Promise<void>;
+  dispararVagaVoluntariaExtraordinaria: (dados: { ubmId: string; funcao: string; data: string; motivo: string; prazo: string; quantidade: number }) => Promise<string>;
+  voluntariarParaVaga: (vagaId: string) => Promise<void>;
+  desistirVoluntariadoExtraordinaria: (vagaId: string) => Promise<void>;
+  resolverVagaCompulsoriamente: (vagaId: string) => Promise<void>;
 
-  solicitarEscalaDiferenciada: (dados: { militarId: string; ubmId: string; data: string; observacao?: string }) => Promise<void>;
+  /** Só o escalante cadastra — cria o registro e já espelha em EscalaOrdinaria (origem 'diferenciada'). */
+  criarEscalaDiferenciada: (dados: { militarId: string; ubmId: string; funcao: string; data: string; observacao?: string }) => Promise<void>;
+  /** Só o Comandante da UBM altera depois de cadastrada. */
+  atualizarEscalaDiferenciada: (id: string, dados: { militarId?: string; funcao?: string; data?: string; observacao?: string }) => Promise<void>;
   removerEscalaDiferenciada: (id: string) => Promise<void>;
-  solicitarAlteracaoDiferenciada: (dados: { escalaDiferenciadaId: string; motivo: string }) => Promise<void>;
-  responderAlteracaoDiferenciada: (id: string, aprovar: boolean) => Promise<void>;
+
+  /** Libera o PDF da semana e grava uma versão no histórico com o que estava escalado no momento. */
+  fecharEscalaSemana: (params: { ubmId: string; tipo: TipoEscalaServico; semanaInicio: string }) => Promise<void>;
+  /** O próprio escalante pode reabrir pra editar de novo — a próxima vez que fechar gera nova versão no histórico. */
+  reabrirEscalaSemana: (params: { ubmId: string; tipo: TipoEscalaServico; semanaInicio: string }) => Promise<void>;
 
   addAfastamento: (dados: Omit<Afastamento, 'id' | 'criado_em' | 'criadoPorId'>) => Promise<void>;
   deleteAfastamento: (id: string) => Promise<void>;
 
   registrarPresenca: (dados: Omit<RegistroPresenca, 'id' | 'criado_em' | 'registradoPorId'>) => Promise<void>;
 
-  criarSolicitacaoServico: (dados: { ubmId: string; tipo: TipoSolicitacaoServico; escalaOrigemId: string; tipoEscalaOrigem: TipoEscalaServico; escalaDestinoId?: string; indicadoId: string; motivo?: string }) => Promise<void>;
+  criarSolicitacaoServico: (dados: {
+    ubmId: string;
+    modalidade: ModalidadeSolicitacaoServico;
+    horarioParcial?: string;
+    localEvento?: string;
+    escalaOrigemId: string;
+    tipoEscalaOrigem: TipoEscalaServico;
+    indicadoId: string;
+    motivo?: string;
+  }) => Promise<void>;
   responderSolicitacaoIndicado: (id: string, aceitar: boolean) => Promise<void>;
-  responderSolicitacaoEscalante: (id: string, aprovar: boolean) => Promise<void>;
+  /** Aprovação final — Comandante OU Escalante da UBM. */
+  responderSolicitacaoAprovador: (id: string, aprovar: boolean) => Promise<void>;
+
+  /** Solicitação de reforço de militar — disparada por CRB/COP pra uma UBM vinculada. */
+  criarSolicitacaoReforco: (dados: {
+    comandoId: string;
+    ubmId: string;
+    funcao: string;
+    postoDesejado?: string;
+    data: string;
+    tipo: TipoReforco;
+    motivo: string;
+  }) => Promise<string>;
+  /** Escalante/Comandante da UBM atende (empenha o militar) ou recusa. */
+  responderSolicitacaoReforco: (id: string, decisao: { atender: boolean; militarId?: string }) => Promise<void>;
+  /** Reforço em massa (CRB/COP): distribui `quantidadeTotal` proporcionalmente entre as UBMs do comando, pelo efetivo ativo de cada uma. */
+  dispararSolicitacaoOperacao: (dados: { comandoId: string; motivo: string; data: string; prazo: string; quantidadeTotal: number }) => Promise<string>;
+  /** Escalante da UBM abre voluntariado pra própria cota (recebida em `SolicitacaoOperacao.cotas`). */
+  abrirVoluntariadoOperacaoUbm: (operacaoId: string) => Promise<string>;
+  voluntariarParaOperacao: (vagaId: string) => Promise<void>;
+  desistirVoluntariadoOperacao: (vagaId: string) => Promise<void>;
+  resolverOperacaoCompulsoriamente: (vagaId: string) => Promise<void>;
 
   marcarAlertaLida: (id: string) => Promise<void>;
+  deleteAlerta: (id: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextData>({} as AppContextData);
 
-function useColecao<T extends { id: string }>(nome: string, ativo: boolean): T[] {
+/**
+ * O Firestore rejeita `undefined` como valor de campo (`setDoc`/`addDoc`
+ * lançam "Unsupported field value: undefined"). Campos opcionais do domínio
+ * (ex.: `militarId` quando o usuário desvincula o efetivo) chegam aqui como
+ * `undefined` — para `create`, basta omitir a chave; para `update`, é
+ * preciso `deleteField()` para de fato remover o campo do documento
+ * existente, e não deixar o valor antigo intacto.
+ */
+function semIndefinidosParaCriar<T extends object>(dados: T): Partial<T> {
+  return Object.fromEntries(Object.entries(dados).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
+function semIndefinidosParaAtualizar<T extends object>(dados: T): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(dados).map(([k, v]) => [k, v === undefined ? deleteField() : v]));
+}
+
+/** yyyy-MM-dd -> dd/MM/yyyy, pra mensagens de notificação. */
+function formatarDataBr(data: string): string {
+  return data.split('-').reverse().join('/');
+}
+
+/**
+ * `filtro` aplica um `where(campo, '==', valor)` na query — necessário
+ * sempre que as firestore.rules da coleção exigem uma condição de leitura
+ * baseada em documento (ex.: `usuarioId == request.auth.uid`): sem o filtro
+ * correspondente na própria query, o Firestore recusa a leitura da coleção
+ * inteira por não conseguir provar a regra para todo documento possível.
+ */
+function useColecao<T extends { id: string }>(
+  nome: string,
+  ativo: boolean,
+  filtro?: { campo: string; valor: string },
+): T[] {
   const [dados, setDados] = useState<T[]>([]);
+  const filtroCampo = filtro?.campo;
+  const filtroValor = filtro?.valor;
 
   useEffect(() => {
     const db = getDb();
-    if (!ativo || !db) {
+    if (!ativo || !db || (filtroCampo && !filtroValor)) {
       setDados([]);
       return;
     }
 
+    const referencia =
+      filtroCampo && filtroValor ? query(collection(db, nome), where(filtroCampo, '==', filtroValor)) : collection(db, nome);
+
     const cancelar = onSnapshot(
-      collection(db, nome),
+      referencia,
       (snapshot) => {
         setDados(
           snapshot.docs.map((documento) => ({
@@ -147,7 +306,7 @@ function useColecao<T extends { id: string }>(nome: string, ativo: boolean): T[]
     );
 
     return () => cancelar();
-  }, [nome, ativo]);
+  }, [nome, ativo, filtroCampo, filtroValor]);
 
   return dados;
 }
@@ -199,24 +358,31 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const usuarioAtual = perfil && perfil.ativo ? perfil : null;
   const isAuthenticated = !!usuarioAtual;
 
-  const ubms = useColecao<Ubm>('ubms', isAuthenticated);
+  // Lida mesmo sem login: a tela de "Solicitar Acesso" precisa listar as
+  // UBMs para quem ainda não tem conta (ver firestore.rules).
+  const ubms = useColecao<Ubm>('ubms', isFirebaseConfigured);
+  const comandos = useColecao<Comando>('comandos', isAuthenticated);
   const usuarios = useColecao<Usuario>('usuarios', isAuthenticated);
   const militares = useColecao<Militar>('militares', isAuthenticated);
+  const funcoes = useColecao<FuncaoUbm>('funcoes', isAuthenticated);
   const escalasOrdinarias = useColecao<EscalaOrdinaria>('escalas_ordinarias', isAuthenticated);
   const escalasExtraordinarias = useColecao<EscalaExtraordinaria>('escalas_extraordinarias', isAuthenticated);
   const escalasDiferenciadas = useColecao<EscalaDiferenciada>('escalas_diferenciadas', isAuthenticated);
-  const solicitacoesAlteracaoDiferenciada = useColecao<SolicitacaoAlteracaoDiferenciada>(
-    'solicitacoes_alteracao_diferenciada',
-    isAuthenticated,
-  );
+  const vagasVoluntariasExtraordinarias = useColecao<VagaVoluntariaExtraordinaria>('vagas_voluntarias_extraordinarias', isAuthenticated);
   const afastamentos = useColecao<Afastamento>('afastamentos', isAuthenticated);
   const presencas = useColecao<RegistroPresenca>('presencas', isAuthenticated);
   const solicitacoesServico = useColecao<SolicitacaoServico>('solicitacoes_servico', isAuthenticated);
-  const alertasTodos = useColecao<Alerta>('alertas', isAuthenticated);
-  const alertas = useMemo(
-    () => alertasTodos.filter((a) => a.usuarioId === usuarioAtual?.id),
-    [alertasTodos, usuarioAtual],
-  );
+  const solicitacoesRemanejamento = useColecao<SolicitacaoRemanejamento>('solicitacoes_remanejamento', isAuthenticated);
+  const solicitacoesOperacao = useColecao<SolicitacaoOperacao>('solicitacoes_operacao', isAuthenticated);
+  const vagasVoluntariasOperacao = useColecao<VagaVoluntariaOperacao>('vagas_voluntarias_operacao', isAuthenticated);
+  const solicitacoesReforco = useColecao<SolicitacaoReforco>('solicitacoes_reforco', isAuthenticated);
+  const escalasComando = useColecao<EscalaComando>('escalas_comando', isAuthenticated);
+  const fechamentosEscala = useColecao<FechamentoEscala>('fechamentos_escala', isAuthenticated);
+  const historicoEscalas = useColecao<HistoricoEscala>('historico_escalas', isAuthenticated);
+  const alertas = useColecao<Alerta>('alertas', isAuthenticated, {
+    campo: 'usuarioId',
+    valor: usuarioAtual?.id ?? '',
+  });
 
   // --- Autenticação ---------------------------------------------------------
   const registrarLogAcesso = useCallback(async (userId: string | null, email: string, sucesso: boolean) => {
@@ -236,11 +402,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const login = useCallback(
-    async (email: string, senha?: string) => {
+    async (identificador: string, senha?: string) => {
       let userIdParaLog: string | null = null;
+      let email = identificador;
       try {
         const auth = requireFirebaseAuth();
         const db = requireDb();
+
+        if (!identificador.includes('@')) {
+          const chave = normalizarMatricula(identificador);
+          const matriculaSnap = chave ? await getDoc(doc(db, 'matriculas', chave)) : null;
+          if (!matriculaSnap?.exists()) {
+            throw new Error('Matrícula não encontrada. Verifique o número ou use seu e-mail para entrar.');
+          }
+          email = (matriculaSnap.data() as { email: string }).email;
+        }
+
         const credencial = await signInWithEmailAndPassword(auth, email, senha ?? '');
         userIdParaLog = credencial.user.uid;
         const perfilSnap = await getDoc(doc(db, 'usuarios', credencial.user.uid));
@@ -288,12 +465,124 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       } catch (erro) {
         console.error('Erro ao criar alerta:', erro);
       }
+
+      // Push no navegador (ver pushNotifications.ts/pushService.ts) — só se
+      // o destinatário tiver ativado em Meu Perfil. Nunca aguardado: falha
+      // de push não pode atrasar nem derrubar quem chamou notificar(), o
+      // alerta interno acima já é a garantia mínima.
+      const destinatario = usuarios.find((u) => u.id === usuarioId);
+      if (destinatario?.fcmTokens?.length) {
+        void enviarPush({ tokens: destinatario.fcmTokens, title: 'GESOP', body: mensagem, link });
+      }
+    },
+    [usuarios],
+  );
+
+  /**
+   * Avisa o militar (alerta no sistema + e-mail) sempre que uma escala dele
+   * muda — entrou (`tipo: 'escalado'`) ou saiu (`tipo: 'removido_da_escala'`,
+   * por troca ou remoção manual) —, ordinária, extraordinária ou
+   * diferenciada, gerada automaticamente ou lançada manualmente pelo
+   * escalante. Só notifica quem já tem conta vinculada
+   * (`usuarios.militarId`) — um militar cadastrado no Efetivo mas que ainda
+   * não fez o primeiro acesso simplesmente não recebe nada, sem erro nem
+   * bloqueio.
+   */
+  const notificarMilitarEscalado = useCallback(
+    async (militarId: string, mensagemAlerta: string, assuntoEmail: string, htmlEmail: string, tipo: Alerta['tipo'] = 'escalado') => {
+      const usuarioMilitar = usuarios.find((u) => u.militarId === militarId);
+      if (!usuarioMilitar) return;
+      await notificar(usuarioMilitar.id, tipo, mensagemAlerta, '/sistema/escala');
+      try {
+        await enviarEmail({ to: usuarioMilitar.email, subject: assuntoEmail, html: htmlEmail });
+      } catch (erroEnvio) {
+        console.error('Erro ao enviar e-mail de escalação:', erroEnvio);
+      }
+    },
+    [usuarios, notificar],
+  );
+
+  /** Notifica por e-mail o(s) Comandante/Escalante de uma UBM sobre uma nova solicitação de acesso. */
+  const notificarAprovadoresDaUbm = useCallback(
+    async (ubmId: string, nome: string, email: string, cargo?: string) => {
+      try {
+        const db = requireDb();
+        const aprovadoresSnap = await getDocs(
+          query(collection(db, 'usuarios'), where('ubmId', '==', ubmId)),
+        );
+        const aprovadores = aprovadoresSnap.docs
+          .map((d) => ({ ...(d.data() as object), id: d.id }) as Usuario)
+          .filter((u) => u.papeis?.includes('comandante') || u.papeis?.includes('escalante'));
+
+        await Promise.all(
+          aprovadores.map((destinatario) =>
+            enviarEmail({
+              to: destinatario.email,
+              subject: `Nova solicitação de acesso — ${nome}`,
+              html: `<h2>Nova Solicitação de Acesso</h2><p><b>${nome}</b>${cargo ? ` (${cargo})` : ''} solicitou acesso ao GESOP com o e-mail <b>${email}</b>.</p><p>Acesse o módulo <b>Usuários</b> para revisar e ativar o acesso.</p>`,
+            }).catch((erroEnvio) => console.error('Erro ao notificar aprovador:', erroEnvio)),
+          ),
+        );
+      } catch (erroNotificacao) {
+        console.error('Erro ao buscar aprovadores para notificar solicitação de acesso:', erroNotificacao);
+      }
+    },
+    [],
+  );
+
+  /**
+   * Avisa por e-mail todo mundo com papel 'master' quando alguém pede acesso
+   * mas não foi encontrado na planilha de efetivo — pra incluírem a pessoa
+   * lá. Por e-mail (não alerta in-app via `notificar`) pelo mesmo motivo de
+   * `notificarAprovadoresDaUbm`: nesse momento a conta recém-criada ainda
+   * está com `ativo: false`, e a regra do Firestore para criar alertas
+   * exige `ativo()` — só e-mail funciona antes da aprovação.
+   */
+  const notificarMasterSobreNaoEncontrado = useCallback(
+    async (dados: { nome: string; matricula?: string; cargo?: string; email: string }) => {
+      try {
+        const db = requireDb();
+        const mastersSnap = await getDocs(
+          query(collection(db, 'usuarios'), where('papeis', 'array-contains', 'master')),
+        );
+        const masters = mastersSnap.docs.map((d) => ({ ...(d.data() as object), id: d.id }) as Usuario);
+        const detalhes = [dados.cargo, dados.matricula ? `MF ${dados.matricula}` : undefined].filter(Boolean).join(' — ');
+        await Promise.all(
+          masters.map((m) =>
+            enviarEmail({
+              to: m.email,
+              subject: `Militar não encontrado na planilha — ${dados.nome}`,
+              html: `<h2>Solicitação de acesso sem correspondência na planilha</h2><p><b>${dados.nome}</b>${detalhes ? ` (${detalhes})` : ''} pediu acesso ao GESOP com o e-mail <b>${dados.email}</b>, mas não foi encontrado na planilha de efetivo.</p><p>Inclua a pessoa na planilha e/ou aprove o acesso manualmente no módulo <b>Usuários</b>.</p>`,
+            }).catch((erroEnvio) => console.error('Erro ao notificar master:', erroEnvio)),
+          ),
+        );
+      } catch (erroNotificacao) {
+        console.error('Erro ao buscar masters para notificar militar não encontrado na planilha:', erroNotificacao);
+      }
     },
     [],
   );
 
   const solicitarAcesso = useCallback(
-    async ({ nome, email, senha, ubmId, cargo }: { nome: string; email: string; senha: string; ubmId: string; cargo?: string }) => {
+    async ({
+      nome,
+      nomeGuerra,
+      matricula,
+      email,
+      senha,
+      ubmId,
+      cargo,
+      naoEncontradoNaPlanilha,
+    }: {
+      nome: string;
+      nomeGuerra?: string;
+      matricula?: string;
+      email: string;
+      senha: string;
+      ubmId: string;
+      cargo?: string;
+      naoEncontradoNaPlanilha?: boolean;
+    }) => {
       try {
         const auth = requireFirebaseAuth();
         const db = requireDb();
@@ -301,6 +590,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
         await setDoc(doc(db, 'usuarios', credencial.user.uid), {
           nome,
+          ...(nomeGuerra ? { nomeGuerra } : {}),
+          ...(matricula ? { matricula } : {}),
           email,
           cargo: cargo ?? '',
           ubmId,
@@ -309,33 +600,132 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           criado_em: new Date().toISOString(),
         });
 
-        try {
-          const aprovadoresSnap = await getDocs(
-            query(collection(db, 'usuarios'), where('ubmId', '==', ubmId)),
-          );
-          const aprovadores = aprovadoresSnap.docs
-            .map((d) => ({ ...(d.data() as object), id: d.id }) as Usuario)
-            .filter((u) => u.papeis?.includes('comandante') || u.papeis?.includes('escalante'));
-
-          await Promise.all(
-            aprovadores.map((destinatario) =>
-              enviarEmail({
-                to: destinatario.email,
-                subject: `Nova solicitação de acesso — ${nome}`,
-                html: `<h2>Nova Solicitação de Acesso</h2><p><b>${nome}</b>${cargo ? ` (${cargo})` : ''} solicitou acesso ao Sistema de Jornada de Trabalho com o e-mail <b>${email}</b>.</p><p>Acesse o módulo <b>Usuários</b> para revisar e ativar o acesso.</p>`,
-              }).catch((erroEnvio) => console.error('Erro ao notificar aprovador:', erroEnvio)),
-            ),
-          );
-        } catch (erroNotificacao) {
-          console.error('Erro ao buscar aprovadores para notificar solicitação de acesso:', erroNotificacao);
+        await notificarAprovadoresDaUbm(ubmId, nome, email, cargo);
+        if (naoEncontradoNaPlanilha) {
+          await notificarMasterSobreNaoEncontrado({ nome, matricula, cargo, email });
         }
-
         await signOut(auth);
       } catch (erro) {
         throw new Error(mensagemErroAuth(erro));
       }
     },
-    [],
+    [notificarAprovadoresDaUbm, notificarMasterSobreNaoEncontrado],
+  );
+
+  const validarMatriculaEfetivo = useCallback(async (matricula: string) => {
+    return buscarMilitarPorMatricula(matricula);
+  }, []);
+
+  const buscarMilitaresEfetivoPorNome = useCallback(async (nome: string) => {
+    return buscarMilitaresPorNome(nome);
+  }, []);
+
+  /**
+   * Primeiro acesso por matrícula: a matrícula já foi validada contra a
+   * planilha ao vivo (ver `validarMatriculaEfetivo`) antes de chegar aqui.
+   * Cria a conta e o perfil, sempre com papel 'militar', e registra
+   * `matriculas/{matricula}` para permitir login por matrícula depois.
+   * Nunca envia a senha por e-mail: a pessoa acabou de digitá-la e
+   * confirmá-la duas vezes, só confirma o cadastro.
+   *
+   * Auto-vínculo: se o escalante já cadastrou essa pessoa no Efetivo da
+   * mesma UBM (mesma matrícula normalizada), a conta já nasce ATIVA e
+   * vinculada a esse `Militar` — a existência do registro é a própria
+   * verificação, sem precisar de aprovação manual. Senão, nasce inativa e
+   * segue o fluxo de sempre (notifica o escalante/comandante pra aprovar E
+   * incluir no efetivo). Retorna se ficou auto-vinculada, pra ajustar a
+   * mensagem mostrada.
+   */
+  const primeiroAcessoPorMatricula = useCallback(
+    async ({
+      matricula,
+      nomeCompleto,
+      cargo,
+      nomeGuerra,
+      email,
+      senha,
+      ubmId,
+    }: {
+      matricula: string;
+      nomeCompleto: string;
+      cargo?: string;
+      nomeGuerra: string;
+      email: string;
+      senha: string;
+      ubmId: string;
+    }): Promise<{ autoVinculado: boolean }> => {
+      try {
+        const auth = requireFirebaseAuth();
+        const db = requireDb();
+        const matriculaNormalizada = normalizarMatricula(matricula);
+        const credencial = await createUserWithEmailAndPassword(auth, email, senha);
+
+        await setDoc(
+          doc(db, 'usuarios', credencial.user.uid),
+          semIndefinidosParaCriar({
+            nome: nomeCompleto,
+            nomeGuerra,
+            matricula: matriculaNormalizada,
+            cargo,
+            email,
+            ubmId,
+            papeis: ['militar'],
+            ativo: false,
+            criado_em: new Date().toISOString(),
+          }),
+        );
+
+        try {
+          await setDoc(doc(db, 'matriculas', matriculaNormalizada), { email });
+        } catch (erroMatricula) {
+          // Não impede o cadastro — sem isso, a pessoa ainda consegue entrar pelo e-mail.
+          console.error('Erro ao registrar matrícula para login:', erroMatricula);
+        }
+
+        let autoVinculado = false;
+        try {
+          const militarSnap = await getDocs(
+            query(
+              collection(db, 'militares'),
+              where('ubmId', '==', ubmId),
+              where('matricula', '==', matriculaNormalizada),
+            ),
+          );
+          if (!militarSnap.empty) {
+            await updateDoc(doc(db, 'usuarios', credencial.user.uid), {
+              ativo: true,
+              militarId: militarSnap.docs[0].id,
+            });
+            autoVinculado = true;
+          }
+        } catch (erroVinculo) {
+          // Sem vínculo automático, segue pro fluxo normal de aprovação —
+          // nunca deixa a pessoa sem conseguir se cadastrar por causa disso.
+          console.error('Erro ao checar vínculo automático com o Efetivo:', erroVinculo);
+        }
+
+        try {
+          await enviarEmail({
+            to: email,
+            subject: autoVinculado ? 'Acesso liberado — GESOP' : 'Cadastro recebido — GESOP',
+            html: autoVinculado
+              ? `<h2>Acesso liberado</h2><p>Olá, ${nomeGuerra}. Seu cadastro (matrícula ${matricula}) já está vinculado ao efetivo da sua UBM — pode entrar no sistema normalmente com o e-mail e a senha que você cadastrou.</p>`
+              : `<h2>Cadastro recebido</h2><p>Olá, ${nomeGuerra}. Seu cadastro (matrícula ${matricula}) foi recebido e está aguardando aprovação do Comandante/Escalante da sua UBM. Você será avisado quando puder acessar o sistema.</p>`,
+          });
+        } catch (erroEnvio) {
+          console.error('Erro ao enviar e-mail de confirmação de cadastro:', erroEnvio);
+        }
+
+        if (!autoVinculado) {
+          await notificarAprovadoresDaUbm(ubmId, nomeCompleto, email, cargo);
+        }
+        await signOut(auth);
+        return { autoVinculado };
+      } catch (erro) {
+        throw new Error(mensagemErroAuth(erro));
+      }
+    },
+    [notificarAprovadoresDaUbm],
   );
 
   const enviarResetSenha = useCallback(async (email: string) => {
@@ -347,17 +737,238 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
+  /** Autoedição do próprio perfil (conta de acesso) — só o nome de guerra, não mexe no cadastro de efetivo. */
+  const atualizarMeuPerfil = useCallback(
+    async (dados: { nomeGuerra: string }) => {
+      const db = requireDb();
+      if (!usuarioAtual) throw new Error('Você precisa estar autenticado.');
+      await updateDoc(doc(db, 'usuarios', usuarioAtual.id), { nomeGuerra: dados.nomeGuerra });
+    },
+    [usuarioAtual],
+  );
+
+  /**
+   * Pede permissão de notificação e, se concedida, guarda o token deste
+   * dispositivo em `usuarios/{uid}.fcmTokens` (um array — a mesma conta
+   * pode ativar em mais de um aparelho/navegador). Devolve `false` sem
+   * lançar erro se o usuário negar, o navegador não suportar, ou a VAPID
+   * key não estiver configurada — quem chama decide como comunicar isso.
+   */
+  const ativarNotificacoesPushNoDispositivo = useCallback(async (): Promise<boolean> => {
+    if (!usuarioAtual) throw new Error('Você precisa estar autenticado.');
+    const token = await ativarNotificacoesPush();
+    if (!token) return false;
+    const db = requireDb();
+    await updateDoc(doc(db, 'usuarios', usuarioAtual.id), { fcmTokens: arrayUnion(token) });
+    return true;
+  }, [usuarioAtual]);
+
+  /**
+   * Militar pede ao escalante/comandante da própria UBM pra passar a
+   * exercer (ou deixar de exercer) uma função — não se aplica sozinho, fica
+   * `pendente` até ser respondido.
+   */
+  const solicitarRemanejamentoFuncao = useCallback(
+    async (dados: { funcaoDesejadaId: string; motivo: string }) => {
+      const db = requireDb();
+      if (!usuarioAtual?.militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
+      const ubmId = usuarioAtual.ubmId;
+      await addDoc(collection(db, 'solicitacoes_remanejamento'), {
+        ubmId,
+        militarId: usuarioAtual.militarId,
+        solicitanteId: usuarioAtual.id,
+        funcaoDesejadaId: dados.funcaoDesejadaId,
+        motivo: dados.motivo,
+        status: 'pendente' as StatusRemanejamento,
+        criado_em: new Date().toISOString(),
+      });
+
+      const funcaoNome = funcoes.find((f) => f.id === dados.funcaoDesejadaId)?.nome ?? 'função removida';
+      const aprovadores = usuarios.filter(
+        (u) => u.ubmId === ubmId && (u.papeis.includes('comandante') || u.papeis.includes('escalante')),
+      );
+      await Promise.all(
+        aprovadores.map((a) =>
+          notificar(
+            a.id,
+            'remanejamento_solicitado',
+            `${usuarioAtual.nomeGuerra || usuarioAtual.nome} solicitou remanejamento para a função de ${funcaoNome}.`,
+            '/sistema/solicitacoes',
+          ),
+        ),
+      );
+    },
+    [usuarioAtual, funcoes, usuarios, notificar],
+  );
+
+  /**
+   * Escalante/comandante decide o pedido. Ao aprovar, acrescenta a função
+   * desejada ao cadastro do militar (acúmulo — não remove as demais); a
+   * decisão de tirar alguma função existente continua manual, em Efetivo.
+   */
+  const responderRemanejamento = useCallback(
+    async (id: string, aprovado: boolean) => {
+      const db = requireDb();
+      const solicitacao = solicitacoesRemanejamento.find((s) => s.id === id);
+      if (!solicitacao) throw new Error('Solicitação não encontrada.');
+
+      await updateDoc(doc(db, 'solicitacoes_remanejamento', id), {
+        status: (aprovado ? 'aprovado' : 'rejeitado') as StatusRemanejamento,
+        respondidoPorId: usuarioAtual?.id ?? '',
+        respondido_em: new Date().toISOString(),
+      });
+
+      if (aprovado) {
+        const militar = militares.find((m) => m.id === solicitacao.militarId);
+        if (militar && !militar.funcoes.includes(solicitacao.funcaoDesejadaId)) {
+          await updateDoc(doc(db, 'militares', militar.id), {
+            funcoes: [...militar.funcoes, solicitacao.funcaoDesejadaId],
+            atualizado_em: new Date().toISOString(),
+          });
+        }
+      }
+
+      const funcaoNome = funcoes.find((f) => f.id === solicitacao.funcaoDesejadaId)?.nome ?? 'função removida';
+      const destinatario = usuarios.find((u) => u.id === solicitacao.solicitanteId);
+      if (destinatario) {
+        await notificar(
+          destinatario.id,
+          'remanejamento_respondido',
+          aprovado
+            ? `Seu pedido de remanejamento para ${funcaoNome} foi aprovado.`
+            : `Seu pedido de remanejamento para ${funcaoNome} foi rejeitado.`,
+          '/sistema/solicitacoes',
+        );
+        if (aprovado) {
+          try {
+            await enviarEmail({
+              to: destinatario.email,
+              subject: 'Remanejamento aprovado — GESOP',
+              html: `<p>Seu pedido de remanejamento para a função de <b>${funcaoNome}</b> foi aprovado.</p>`,
+            });
+          } catch (erro) {
+            console.error('Erro ao enviar e-mail de remanejamento aprovado:', erro);
+          }
+        }
+      }
+    },
+    [solicitacoesRemanejamento, militares, funcoes, usuarios, usuarioAtual, notificar],
+  );
+
   // --- UBMs -------------------------------------------------------------
   const addUbm = useCallback(async (dados: Omit<Ubm, 'id'>) => {
     const db = requireDb();
-    const ref = await addDoc(collection(db, 'ubms'), dados);
+    const ref = await addDoc(collection(db, 'ubms'), semIndefinidosParaCriar(dados));
+    // Toda UBM nova já nasce com as funções padrão cadastradas — o
+    // escalante edita os nomes, cria outras ou inativa o que não servir
+    // pra unidade dele a partir daí (ver nota em `FUNCOES_PADRAO`).
+    const agora = new Date().toISOString();
+    const lote = writeBatch(db);
+    FUNCOES_PADRAO.forEach((nome) => {
+      const funcaoRef = doc(collection(db, 'funcoes'));
+      lote.set(funcaoRef, { ubmId: ref.id, nome, ativa: true, criado_em: agora });
+    });
+    await lote.commit();
     return ref.id;
   }, []);
 
   const updateUbm = useCallback(async (id: string, dados: Partial<Ubm>) => {
     const db = requireDb();
-    await updateDoc(doc(db, 'ubms', id), dados);
+    await updateDoc(doc(db, 'ubms', id), semIndefinidosParaAtualizar(dados));
   }, []);
+
+  // --- Comandos (CRB/COP) — cadastrados pelo master --------------------------
+  const addComando = useCallback(async (dados: Omit<Comando, 'id'>) => {
+    const db = requireDb();
+    const ref = await addDoc(collection(db, 'comandos'), semIndefinidosParaCriar(dados));
+    return ref.id;
+  }, []);
+
+  const updateComando = useCallback(async (id: string, dados: Partial<Comando>) => {
+    const db = requireDb();
+    await updateDoc(doc(db, 'comandos', id), semIndefinidosParaAtualizar(dados));
+  }, []);
+
+  const deleteComando = useCallback(async (id: string) => {
+    const db = requireDb();
+    await deleteDoc(doc(db, 'comandos', id));
+  }, []);
+
+  /**
+   * Vincula a própria UBM a um CRB/COP (ou desvincula, passando `null`) —
+   * usado pelo Comandante/Escalante na tela de UBMs, sem precisar do módulo
+   * Comandos (exclusivo do master). Só mexe no array `ubmIds` de cada
+   * comando afetado, um de cada vez, tirando do antigo (se houver) e
+   * pondo no novo — a regra do Firestore só permite mexer no próprio id
+   * dentro desse array, nunca no de outra UBM.
+   */
+  const vincularUbmAoComando = useCallback(
+    async (ubmId: string, novoComandoId: string | null) => {
+      const db = requireDb();
+      const lote = writeBatch(db);
+      let algumaMudanca = false;
+      comandos.forEach((c) => {
+        const temAgora = c.ubmIds.includes(ubmId);
+        const deveTer = c.id === novoComandoId;
+        if (temAgora && !deveTer) {
+          lote.update(doc(db, 'comandos', c.id), { ubmIds: c.ubmIds.filter((id) => id !== ubmId) });
+          algumaMudanca = true;
+        } else if (!temAgora && deveTer) {
+          lote.update(doc(db, 'comandos', c.id), { ubmIds: [...c.ubmIds, ubmId] });
+          algumaMudanca = true;
+        }
+      });
+      if (algumaMudanca) await lote.commit();
+    },
+    [comandos],
+  );
+
+  // --- Funções operacionais (cadastro por UBM) ------------------------------
+  const addFuncao = useCallback(
+    async (dados: { ubmId: string; nome: string }) => {
+      const db = requireDb();
+      const ref = await addDoc(collection(db, 'funcoes'), {
+        ubmId: dados.ubmId,
+        nome: dados.nome,
+        ativa: true,
+        ordem: funcoes.filter((f) => f.ubmId === dados.ubmId).length,
+        criado_em: new Date().toISOString(),
+      });
+      return ref.id;
+    },
+    [funcoes],
+  );
+
+  const updateFuncao = useCallback(async (id: string, dados: Partial<Pick<FuncaoUbm, 'nome' | 'ativa'>>) => {
+    const db = requireDb();
+    await updateDoc(doc(db, 'funcoes', id), semIndefinidosParaAtualizar(dados));
+  }, []);
+
+  const deleteFuncao = useCallback(async (id: string) => {
+    const db = requireDb();
+    await deleteDoc(doc(db, 'funcoes', id));
+  }, []);
+
+  /** Reordena as funções da UBM (setinhas pra cima/baixo no Kanban) — troca a posição com a vizinha e regrava `ordem` de todas, pra nunca depender de valores antigos/ausentes. */
+  const moverOrdemFuncao = useCallback(
+    async (ubmId: string, funcaoId: string, direcao: 'cima' | 'baixo') => {
+      const db = requireDb();
+      const daUbm = funcoes
+        .filter((f) => f.ubmId === ubmId)
+        .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0) || String(a.criado_em ?? '').localeCompare(String(b.criado_em ?? '')));
+      const indice = daUbm.findIndex((f) => f.id === funcaoId);
+      const alvo = direcao === 'cima' ? indice - 1 : indice + 1;
+      if (indice === -1 || alvo < 0 || alvo >= daUbm.length) return;
+
+      const reordenada = [...daUbm];
+      [reordenada[indice], reordenada[alvo]] = [reordenada[alvo], reordenada[indice]];
+
+      const batch = writeBatch(db);
+      reordenada.forEach((f, i) => batch.update(doc(db, 'funcoes', f.id), { ordem: i }));
+      await batch.commit();
+    },
+    [funcoes],
+  );
 
   // --- Usuários (aprovação de cadastro, perfis) -----------------------------
   const updateUsuario = useCallback(async (id: string, dados: Partial<Usuario>) => {
@@ -365,7 +976,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const campos: Record<string, unknown> = { ...dados };
     delete campos.id;
     delete (campos as { senha?: unknown }).senha;
-    await updateDoc(doc(db, 'usuarios', id), campos);
+    await updateDoc(doc(db, 'usuarios', id), semIndefinidosParaAtualizar(campos));
   }, []);
 
   /**
@@ -379,7 +990,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         const db = requireDb();
         const { senha, ...perfilNovo } = dados;
         const uid = await criarContaAuthIsolada(perfilNovo.email, senha);
-        await setDoc(doc(db, 'usuarios', uid), { ...perfilNovo, criado_em: new Date().toISOString() });
+        await setDoc(doc(db, 'usuarios', uid), semIndefinidosParaCriar({ ...perfilNovo, criado_em: new Date().toISOString() }));
       } catch (erro) {
         throw new Error(mensagemErroAuth(erro));
       }
@@ -479,10 +1090,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // --- Escala ordinária ------------------------------------------------
+  // Gera sempre pra UBM inteira (todas as funções ativas de uma vez), nunca
+  // uma função isolada — é o que garante que ninguém seja escalado em duas
+  // funções no mesmo dia e que quem acumula funções seja priorizado na mais
+  // escassa (ver nota em `gerarEscalaOrdinariaUbm`).
   const gerarEPersistirEscalaOrdinaria = useCallback(
-    async (params: { ubmId: string; funcao: FuncaoOperacional; dataInicio: string; dataFim: string }) => {
+    async (params: { ubmId: string; dataInicio: string; dataFim: string }) => {
       const db = requireDb();
-      const geradas = gerarEscalaOrdinaria({ ...params, militares, afastamentos });
+      const geradas = gerarEscalaOrdinariaUbm({
+        ...params,
+        funcoes,
+        militares,
+        afastamentos,
+        escalasOrdinariasExistentes: escalasOrdinarias,
+      });
       const agora = new Date().toISOString();
 
       for (let inicio = 0; inicio < geradas.length; inicio += 400) {
@@ -494,24 +1115,126 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         await lote.commit();
       }
 
+      // Um resumo por militar (não um e-mail por dia gerado) — uma geração
+      // pode cobrir um ano inteiro de uma vez, então notificar dia a dia
+      // enviaria dezenas de e-mails de uma vez pra mesma pessoa.
+      const datasPorMilitar = new Map<string, string[]>();
+      geradas.forEach((item) => {
+        if (!datasPorMilitar.has(item.militarId)) datasPorMilitar.set(item.militarId, []);
+        datasPorMilitar.get(item.militarId)!.push(item.data);
+      });
+      await Promise.all(
+        Array.from(datasPorMilitar.entries()).map(([militarId, datas]) => {
+          const datasOrdenadas = [...datas].sort().map(formatarDataBr);
+          const plural = datasOrdenadas.length > 1 ? `${datasOrdenadas.length} dias` : '1 dia';
+          return notificarMilitarEscalado(
+            militarId,
+            `Você entrou na previsão da escala ordinária em ${plural}: ${datasOrdenadas.join(', ')}.`,
+            'Nova previsão de escala — GESOP',
+            `<p>Você entrou na previsão da escala ordinária em <b>${plural}</b>:</p><p>${datasOrdenadas.join(', ')}</p>`,
+          );
+        }),
+      );
+
       return geradas.length;
     },
-    [militares, afastamentos],
+    [funcoes, militares, afastamentos, escalasOrdinarias, notificarMilitarEscalado],
   );
 
-  const updateEscalaOrdinaria = useCallback(async (id: string, militarId: string) => {
-    const db = requireDb();
-    await updateDoc(doc(db, 'escalas_ordinarias', id), { militarId, origem: 'manual' });
-  }, []);
+  const updateEscalaOrdinaria = useCallback(
+    async (id: string, militarId: string) => {
+      const db = requireDb();
+      const entrada = escalasOrdinarias.find((e) => e.id === id);
+      await updateDoc(doc(db, 'escalas_ordinarias', id), { militarId, origem: 'manual' });
+      if (!entrada) return;
+      const funcaoNome = funcoes.find((f) => f.id === entrada.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(entrada.data);
+      await notificarMilitarEscalado(
+        militarId,
+        `Você foi escalado(a) pra ${funcaoNome} em ${dataBr}.`,
+        'Você foi escalado — GESOP',
+        `<p>Você foi escalado(a) pra <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+      );
+      if (entrada.militarId !== militarId) {
+        await notificarMilitarEscalado(
+          entrada.militarId,
+          `Você foi removido(a) da escala de ${funcaoNome} em ${dataBr} (substituído).`,
+          'Você foi removido de uma escala — GESOP',
+          `<p>Você foi removido(a) da escala de <b>${funcaoNome}</b> em <b>${dataBr}</b> (substituído).</p>`,
+          'removido_da_escala',
+        );
+      }
+    },
+    [escalasOrdinarias, funcoes, notificarMilitarEscalado],
+  );
 
-  const deleteEscalaOrdinaria = useCallback(async (id: string) => {
-    const db = requireDb();
-    await deleteDoc(doc(db, 'escalas_ordinarias', id));
-  }, []);
+  /**
+   * Kanban por função: mais de um militar pode estar escalado na mesma
+   * função no mesmo dia (cada um é o seu próprio cartão) — arrastar um
+   * cartão pra outro dia sempre MOVE (nunca troca de lugar com quem já
+   * estiver lá, já que os dois podem coexistir na célula de destino).
+   */
+  const moverDataEscalaOrdinaria = useCallback(
+    async (id: string, novaData: string) => {
+      const db = requireDb();
+      await updateDoc(doc(db, 'escalas_ordinarias', id), { data: novaData, origem: 'manual' });
+      const entrada = escalasOrdinarias.find((e) => e.id === id);
+      if (!entrada) return;
+      const funcaoNome = funcoes.find((f) => f.id === entrada.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(novaData);
+      await notificarMilitarEscalado(
+        entrada.militarId,
+        `Sua escala de ${funcaoNome} foi remarcada pra ${dataBr}.`,
+        'Sua escala foi remarcada — GESOP',
+        `<p>Sua escala de <b>${funcaoNome}</b> foi remarcada pra <b>${dataBr}</b>.</p>`,
+      );
+    },
+    [escalasOrdinarias, funcoes, notificarMilitarEscalado],
+  );
+
+  const deleteEscalaOrdinaria = useCallback(
+    async (id: string) => {
+      const db = requireDb();
+      const entrada = escalasOrdinarias.find((e) => e.id === id);
+      await deleteDoc(doc(db, 'escalas_ordinarias', id));
+      if (!entrada) return;
+      const funcaoNome = funcoes.find((f) => f.id === entrada.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(entrada.data);
+      await notificarMilitarEscalado(
+        entrada.militarId,
+        `Você foi removido(a) da escala de ${funcaoNome} em ${dataBr}.`,
+        'Você foi removido de uma escala — GESOP',
+        `<p>Você foi removido(a) da escala de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+        'removido_da_escala',
+      );
+    },
+    [escalasOrdinarias, funcoes, notificarMilitarEscalado],
+  );
+
+  /** Kanban por função: adiciona mais um militar numa função+dia que já tem gente (ou começa vazia) — sem mexer nos cartões que já estavam lá. */
+  const adicionarEscalaOrdinaria = useCallback(
+    async (dados: { ubmId: string; funcao: string; data: string; militarId: string }) => {
+      const db = requireDb();
+      await addDoc(collection(db, 'escalas_ordinarias'), {
+        ...dados,
+        origem: 'manual' as EscalaOrdinaria['origem'],
+        criado_em: new Date().toISOString(),
+      });
+      const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(dados.data);
+      await notificarMilitarEscalado(
+        dados.militarId,
+        `Você foi escalado(a) pra ${funcaoNome} em ${dataBr}.`,
+        'Você foi escalado — GESOP',
+        `<p>Você foi escalado(a) pra <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+      );
+    },
+    [funcoes, notificarMilitarEscalado],
+  );
 
   // --- Escala extraordinária ---------------------------------------------
   const criarEscalaExtraordinaria = useCallback(
-    async (dados: { ubmId: string; funcao: FuncaoOperacional; data: string; motivo: string; militarIdEscolhido?: string }) => {
+    async (dados: { ubmId: string; funcao: string; data: string; motivo: string; militarIdEscolhido?: string }) => {
       const db = requireDb();
       const sugerido = sugerirMilitarExtraordinario({
         ubmId: dados.ubmId,
@@ -519,9 +1242,23 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         data: dados.data,
         militares,
         afastamentos,
+        escalasOrdinarias,
         extraordinariasAnteriores: escalasExtraordinarias,
       });
-      if (!sugerido) throw new Error('Nenhum militar disponível nessa função para sugerir.');
+      if (!sugerido) {
+        throw new Error(
+          'Nenhum militar disponível nessa função para sugerir (todos afastados ou já no teto de ' +
+            `${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês).`,
+        );
+      }
+
+      const militarFinal = dados.militarIdEscolhido ?? sugerido.id;
+      if (
+        dados.militarIdEscolhido &&
+        extraordinariasNoMes(militarFinal, dados.data, escalasExtraordinarias, afastamentos) >= LIMITE_EXTRAORDINARIAS_POR_MES
+      ) {
+        throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
+      }
 
       const ref = await addDoc(collection(db, 'escalas_extraordinarias'), {
         ubmId: dados.ubmId,
@@ -529,107 +1266,1011 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         data: dados.data,
         motivo: dados.motivo,
         militarSugeridoId: sugerido.id,
-        militarId: dados.militarIdEscolhido ?? sugerido.id,
+        militarId: militarFinal,
         criadoPorId: usuarioAtual?.id ?? '',
         criado_em: new Date().toISOString(),
       });
+
+      const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(dados.data);
+      await notificarMilitarEscalado(
+        militarFinal,
+        `Você foi escalado(a) pra uma extraordinária de ${funcaoNome} em ${dataBr} (${dados.motivo}).`,
+        'Você foi escalado — GESOP',
+        `<p>Você foi escalado(a) pra uma extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p><p>Motivo: ${dados.motivo}</p>`,
+      );
       return ref.id;
     },
-    [militares, afastamentos, escalasExtraordinarias, usuarioAtual],
+    [militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarioAtual, funcoes, notificarMilitarEscalado],
   );
 
-  const alterarMilitarExtraordinaria = useCallback(async (id: string, militarId: string) => {
-    const db = requireDb();
-    // O militarSugeridoId nunca é sobrescrito — a estatística de rodízio
-    // continua contando como se a sugestão tivesse sido seguida.
-    await updateDoc(doc(db, 'escalas_extraordinarias', id), { militarId });
-  }, []);
-
-  // --- Escala diferenciada -------------------------------------------------
-  const solicitarEscalaDiferenciada = useCallback(
-    async (dados: { militarId: string; ubmId: string; data: string; observacao?: string }) => {
+  const alterarMilitarExtraordinaria = useCallback(
+    async (id: string, militarId: string) => {
       const db = requireDb();
-      await addDoc(collection(db, 'escalas_diferenciadas'), {
-        ...dados,
-        criado_em: new Date().toISOString(),
-      });
+      const atual = escalasExtraordinarias.find((e) => e.id === id);
+      if (atual && extraordinariasNoMes(militarId, atual.data, escalasExtraordinarias, afastamentos) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
+        throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
+      }
+      // O militarSugeridoId nunca é sobrescrito — a estatística de rodízio
+      // continua contando como se a sugestão tivesse sido seguida.
+      await updateDoc(doc(db, 'escalas_extraordinarias', id), { militarId });
+      if (atual) {
+        const funcaoNome = funcoes.find((f) => f.id === atual.funcao)?.nome ?? 'função removida';
+        const dataBr = formatarDataBr(atual.data);
+        await notificarMilitarEscalado(
+          militarId,
+          `Você foi escalado(a) pra uma extraordinária de ${funcaoNome} em ${dataBr} (${atual.motivo}).`,
+          'Você foi escalado — GESOP',
+          `<p>Você foi escalado(a) pra uma extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p><p>Motivo: ${atual.motivo}</p>`,
+        );
+        if (atual.militarId !== militarId) {
+          await notificarMilitarEscalado(
+            atual.militarId,
+            `Você foi removido(a) da extraordinária de ${funcaoNome} em ${dataBr} (substituído).`,
+            'Você foi removido de uma escala — GESOP',
+            `<p>Você foi removido(a) da extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b> (substituído).</p>`,
+            'removido_da_escala',
+          );
+        }
+      }
     },
-    [],
+    [escalasExtraordinarias, afastamentos, funcoes, notificarMilitarEscalado],
   );
 
-  const removerEscalaDiferenciada = useCallback(async (id: string) => {
-    const db = requireDb();
-    await deleteDoc(doc(db, 'escalas_diferenciadas', id));
-  }, []);
-
-  const solicitarAlteracaoDiferenciada = useCallback(
-    async (dados: { escalaDiferenciadaId: string; motivo: string }) => {
+  const deleteEscalaExtraordinaria = useCallback(
+    async (id: string) => {
       const db = requireDb();
-      const escala = escalasDiferenciadas.find((e) => e.id === dados.escalaDiferenciadaId);
-      if (!escala) throw new Error('Escala diferenciada não encontrada.');
+      const atual = escalasExtraordinarias.find((e) => e.id === id);
+      await deleteDoc(doc(db, 'escalas_extraordinarias', id));
+      if (!atual) return;
+      const funcaoNome = funcoes.find((f) => f.id === atual.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(atual.data);
+      await notificarMilitarEscalado(
+        atual.militarId,
+        `Você foi removido(a) da extraordinária de ${funcaoNome} em ${dataBr}.`,
+        'Você foi removido de uma escala — GESOP',
+        `<p>Você foi removido(a) da extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+        'removido_da_escala',
+      );
+    },
+    [escalasExtraordinarias, funcoes, notificarMilitarEscalado],
+  );
 
-      await addDoc(collection(db, 'solicitacoes_alteracao_diferenciada'), {
-        escalaDiferenciadaId: dados.escalaDiferenciadaId,
-        militarId: escala.militarId,
-        ubmId: escala.ubmId,
-        solicitanteId: usuarioAtual?.id ?? '',
-        motivo: dados.motivo,
-        status: 'pendente',
-        criado_em: new Date().toISOString(),
+  /**
+   * Dispara uma vaga extraordinária (podendo pedir mais de um militar) pro
+   * efetivo elegível se voluntariar, com prazo — em vez de já escalar
+   * compulsoriamente. Elegibilidade: função ativa, sem afastamento na data,
+   * sob o teto mensal e com 24h de folga desde o serviço anterior (ver nota
+   * em types.ts) — todo elegível recebe alerta.
+   */
+  const dispararVagaVoluntariaExtraordinaria = useCallback(
+    async (dados: { ubmId: string; funcao: string; data: string; motivo: string; prazo: string; quantidade: number }) => {
+      const db = requireDb();
+      const elegiveis = ordenarCandidatosExtraordinario({
+        ubmId: dados.ubmId,
+        funcao: dados.funcao,
+        data: dados.data,
+        militares,
+        afastamentos,
+        escalasOrdinarias,
+        extraordinariasAnteriores: escalasExtraordinarias,
       });
-
-      const militar = militares.find((m) => m.id === escala.militarId);
-      const usuarioMilitar = usuarios.find((u) => u.militarId === escala.militarId);
-      const comandantes = usuarios.filter((u) => u.ubmId === escala.ubmId && u.papeis?.includes('comandante'));
-
-      if (usuarioMilitar) {
-        await notificar(
-          usuarioMilitar.id,
-          'alteracao_diferenciada',
-          `O escalante solicitou alterar sua escala diferenciada de ${escala.data}. Motivo: ${dados.motivo}`,
+      if (elegiveis.length === 0) {
+        throw new Error(
+          'Nenhum militar disponível nessa função pra chamar (todos afastados, sem 24h de folga do serviço anterior, ou já no teto de ' +
+            `${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês).`,
         );
       }
+
+      const ref = await addDoc(collection(db, 'vagas_voluntarias_extraordinarias'), {
+        ubmId: dados.ubmId,
+        funcao: dados.funcao,
+        data: dados.data,
+        motivo: dados.motivo,
+        prazo: dados.prazo,
+        quantidade: dados.quantidade,
+        status: 'aberta' as StatusVagaVoluntaria,
+        candidatosElegiveisIds: elegiveis.map((m) => m.id),
+        voluntariosIds: [],
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      const usuariosElegiveis = usuarios.filter((u) => u.militarId && elegiveis.some((m) => m.id === u.militarId));
+      const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'Função removida';
+      const plural = dados.quantidade > 1 ? `${dados.quantidade} vagas` : '1 vaga';
       await Promise.all(
-        comandantes.map((c) =>
+        usuariosElegiveis.map((u) =>
           notificar(
-            c.id,
-            'alteracao_diferenciada',
-            `Alteração de escala diferenciada de ${militar?.nome ?? 'um militar'} em ${escala.data} aguarda sua autorização.`,
+            u.id,
+            'vaga_voluntaria_disponivel',
+            `Escala extraordinária disponível pra voluntariado: ${plural} de ${funcaoNome} em ${dados.data}. Prazo pra se voluntariar: ${dados.prazo}.`,
+            '/sistema/escala',
+          ),
+        ),
+      );
+      return ref.id;
+    },
+    [militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
+  );
+
+  /**
+   * Voluntariado: cada elegível que se candidata ocupa uma das `quantidade`
+   * posições na hora — sem esperar prazo nem os demais — até a vaga ficar
+   * cheia. A vaga é atualizada ANTES de criar a escala definitiva; se outra
+   * pessoa já tiver ocupado a última posição entre a leitura e a gravação,
+   * esse update é rejeitado pela regra (haveria mais voluntários que
+   * `quantidade`) e a escala nunca chega a ser criada.
+   */
+  const voluntariarParaVaga = useCallback(
+    async (vagaId: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasExtraordinarias.find((v) => v.id === vagaId);
+      const militarId = usuarioAtual?.militarId;
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (!militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
+      if (vaga.status !== 'aberta') throw new Error('Essa vaga já foi preenchida.');
+      if (vaga.voluntariosIds.length >= vaga.quantidade) throw new Error('Essa vaga já está completa.');
+      if (vaga.voluntariosIds.includes(militarId)) throw new Error('Você já se voluntariou pra essa vaga.');
+      if (!vaga.candidatosElegiveisIds.includes(militarId)) {
+        throw new Error('Você não está na lista de elegíveis pra essa vaga.');
+      }
+      if (extraordinariasNoMes(militarId, vaga.data, escalasExtraordinarias, afastamentos) >= LIMITE_EXTRAORDINARIAS_POR_MES) {
+        throw new Error(`Você já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
+      }
+      if (!temFolga24hAntes(militarId, vaga.data, escalasOrdinarias, escalasExtraordinarias)) {
+        throw new Error('Você não tem 24h de folga desde o serviço anterior pra essa data.');
+      }
+
+      const novosVoluntarios = [...vaga.voluntariosIds, militarId];
+      const novoStatus: StatusVagaVoluntaria = novosVoluntarios.length >= vaga.quantidade ? 'preenchida' : 'aberta';
+      try {
+        await updateDoc(doc(db, 'vagas_voluntarias_extraordinarias', vagaId), {
+          status: novoStatus,
+          voluntariosIds: novosVoluntarios,
+        });
+      } catch {
+        throw new Error('Essa vaga já foi preenchida por outros voluntários.');
+      }
+
+      await addDoc(collection(db, 'escalas_extraordinarias'), {
+        ubmId: vaga.ubmId,
+        funcao: vaga.funcao,
+        data: vaga.data,
+        motivo: vaga.motivo,
+        militarSugeridoId: militarId,
+        militarId,
+        vagaVoluntariaId: vagaId,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      const funcaoNome = funcoes.find((f) => f.id === vaga.funcao)?.nome ?? 'Função removida';
+      const dataBr = formatarDataBr(vaga.data);
+      await notificarMilitarEscalado(
+        militarId,
+        `Você se voluntariou e foi confirmado pra escala extraordinária de ${funcaoNome} em ${dataBr}.`,
+        'Você foi escalado — GESOP',
+        `<p>Você se voluntariou e foi confirmado(a) pra escala extraordinária de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+      );
+      if (novoStatus === 'preenchida') {
+        const gestaoDaUbm = usuarios.filter(
+          (u) => u.ubmId === vaga.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+        );
+        await Promise.all(
+          gestaoDaUbm.map((u) =>
+            notificar(
+              u.id,
+              'vaga_voluntaria_resolvida',
+              `A vaga de ${funcaoNome} em ${vaga.data} foi totalmente preenchida por voluntariado.`,
+              '/sistema/escala',
+            ),
+          ),
+        );
+      }
+    },
+    [vagasVoluntariasExtraordinarias, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar, notificarMilitarEscalado],
+  );
+
+  /**
+   * Militar desiste de um voluntariado de escala extraordinária antes da
+   * resolução final — mesma lógica de `desistirVoluntariadoOperacao`: reabre
+   * a vaga (mesmo se já 'preenchida') e remove só o próprio registro. Não é
+   * mais possível depois de resolvida compulsoriamente.
+   */
+  const desistirVoluntariadoExtraordinaria = useCallback(
+    async (vagaId: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasExtraordinarias.find((v) => v.id === vagaId);
+      const militarId = usuarioAtual?.militarId;
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (!militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
+      if (!vaga.voluntariosIds.includes(militarId)) throw new Error('Você não é voluntário dessa vaga.');
+      if (vaga.status === 'expirada_compulsoria') {
+        throw new Error('Essa vaga já foi resolvida compulsoriamente — não é mais possível desistir por aqui.');
+      }
+
+      await updateDoc(doc(db, 'vagas_voluntarias_extraordinarias', vagaId), {
+        status: 'aberta' as StatusVagaVoluntaria,
+        voluntariosIds: vaga.voluntariosIds.filter((id) => id !== militarId),
+      });
+
+      const escalaPropria = escalasExtraordinarias.find((e) => e.militarId === militarId && e.vagaVoluntariaId === vagaId);
+      if (escalaPropria) {
+        await deleteDoc(doc(db, 'escalas_extraordinarias', escalaPropria.id));
+      }
+
+      const funcaoNome = funcoes.find((f) => f.id === vaga.funcao)?.nome ?? 'Função removida';
+      const gestaoDaUbm = usuarios.filter(
+        (u) => u.ubmId === vaga.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+      );
+      await Promise.all(
+        gestaoDaUbm.map((u) =>
+          notificar(
+            u.id,
+            'vaga_voluntaria_disponivel',
+            `Um voluntário desistiu de ${funcaoNome} em ${vaga.data} — a vaga reabriu.`,
+            '/sistema/escala',
           ),
         ),
       );
     },
-    [escalasDiferenciadas, militares, usuarios, usuarioAtual, notificar],
+    [vagasVoluntariasExtraordinarias, escalasExtraordinarias, funcoes, usuarios, usuarioAtual, notificar],
   );
 
-  const responderAlteracaoDiferenciada = useCallback(
-    async (id: string, aprovar: boolean) => {
+  /**
+   * Prazo esgotado com posições sobrando: o escalante completa
+   * compulsoriamente as vagas que faltam — mesmo motor de equidade de
+   * sempre (menos serviços primeiro; empatados em folga, desempata por
+   * hierarquia — mais moderno primeiro — e ainda empatado, por
+   * há-mais-tempo-sem-reforço), dentre os elegíveis que não se voluntariaram.
+   */
+  const resolverVagaCompulsoriamente = useCallback(
+    async (vagaId: string) => {
       const db = requireDb();
-      const solicitacao = solicitacoesAlteracaoDiferenciada.find((s) => s.id === id);
-      if (!solicitacao) throw new Error('Solicitação não encontrada.');
+      const vaga = vagasVoluntariasExtraordinarias.find((v) => v.id === vagaId);
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (vaga.status !== 'aberta') throw new Error('Essa vaga já foi resolvida.');
 
-      await updateDoc(doc(db, 'solicitacoes_alteracao_diferenciada', id), {
-        status: aprovar ? 'aprovada' : 'recusada',
-        resolvido_em: new Date().toISOString(),
-        resolvidoPorId: usuarioAtual?.id ?? '',
-      });
+      const faltam = vaga.quantidade - vaga.voluntariosIds.length;
+      if (faltam <= 0) throw new Error('Essa vaga já está completa.');
 
-      if (aprovar) {
-        await deleteDoc(doc(db, 'escalas_diferenciadas', solicitacao.escalaDiferenciadaId));
+      const ranking = ordenarCandidatosExtraordinario({
+        ubmId: vaga.ubmId,
+        funcao: vaga.funcao,
+        data: vaga.data,
+        militares,
+        afastamentos,
+        escalasOrdinarias,
+        extraordinariasAnteriores: escalasExtraordinarias,
+      }).filter((m) => vaga.candidatosElegiveisIds.includes(m.id) && !vaga.voluntariosIds.includes(m.id));
+      const escolhidos = ranking.slice(0, faltam);
+      if (escolhidos.length < faltam) {
+        throw new Error('Não há militares elegíveis suficientes pra completar essa vaga compulsoriamente.');
       }
 
-      const usuarioMilitar = usuarios.find((u) => u.militarId === solicitacao.militarId);
-      if (usuarioMilitar) {
-        await notificar(
-          usuarioMilitar.id,
-          'alteracao_diferenciada',
-          aprovar
-            ? 'O Comandante autorizou a alteração da sua escala diferenciada.'
-            : 'O Comandante negou a alteração da sua escala diferenciada — ela permanece como estava.',
+      await updateDoc(doc(db, 'vagas_voluntarias_extraordinarias', vagaId), {
+        status: 'expirada_compulsoria' as StatusVagaVoluntaria,
+        militaresCompulsoriosIds: escolhidos.map((m) => m.id),
+        resolvido_em: new Date().toISOString(),
+      });
+
+      const funcaoNome = funcoes.find((f) => f.id === vaga.funcao)?.nome ?? 'Função removida';
+      const dataBr = formatarDataBr(vaga.data);
+      await Promise.all(
+        escolhidos.map(async (m) => {
+          await addDoc(collection(db, 'escalas_extraordinarias'), {
+            ubmId: vaga.ubmId,
+            funcao: vaga.funcao,
+            data: vaga.data,
+            motivo: vaga.motivo,
+            militarSugeridoId: m.id,
+            militarId: m.id,
+            vagaVoluntariaId: vagaId,
+            criadoPorId: usuarioAtual?.id ?? '',
+            criado_em: new Date().toISOString(),
+          });
+          await notificarMilitarEscalado(
+            m.id,
+            `Ninguém se voluntariou a tempo — você foi escalado compulsoriamente pra ${funcaoNome} em ${dataBr}.`,
+            'Você foi escalado — GESOP',
+            `<p>Ninguém se voluntariou a tempo — você foi escalado(a) compulsoriamente pra <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+          );
+        }),
+      );
+    },
+    [vagasVoluntariasExtraordinarias, militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificarMilitarEscalado],
+  );
+
+  // --- Solicitação de Reforço (CRB/COP -> UBM) ------------------------------
+  const criarSolicitacaoReforco = useCallback(
+    async (dados: { comandoId: string; ubmId: string; funcao: string; postoDesejado?: string; data: string; tipo: TipoReforco; motivo: string }) => {
+      const db = requireDb();
+      const sugerido = sugerirMilitarExtraordinario({
+        ubmId: dados.ubmId,
+        funcao: dados.funcao,
+        data: dados.data,
+        militares,
+        afastamentos,
+        escalasOrdinarias,
+        extraordinariasAnteriores: escalasExtraordinarias,
+      });
+
+      const ref = await addDoc(collection(db, 'solicitacoes_reforco'), {
+        ...semIndefinidosParaCriar(dados),
+        status: 'pendente' as StatusSolicitacaoReforco,
+        militarSugeridoId: sugerido?.id,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      const aprovadores = usuarios.filter(
+        (u) => u.ubmId === dados.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+      );
+      await Promise.all(
+        aprovadores.map((a) =>
+          notificar(a.id, 'solicitacao_reforco', 'Chegou uma solicitação de reforço de militar pra sua UBM.', '/sistema/reforcos'),
+        ),
+      );
+
+      // Prévia: o sugerido é avisado (só alerta interno, sem e-mail — ainda
+      // não é definitivo) assim que a solicitação chega, pra já poder se
+      // organizar. Vira confirmação (alerta+e-mail) ou "saiu da prévia"
+      // (alerta+e-mail) quando o escalante responder — ver
+      // `responderSolicitacaoReforco`.
+      if (sugerido) {
+        const usuarioSugerido = usuarios.find((u) => u.militarId === sugerido.id);
+        if (usuarioSugerido) {
+          const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'Função removida';
+          const dataBr = formatarDataBr(dados.data);
+          await notificar(
+            usuarioSugerido.id,
+            'reforco_previa',
+            `Você é o(a) sugerido(a) pra um possível reforço do CRB/COP — ${funcaoNome} em ${dataBr}. Ainda não confirmado; fique de sobreaviso.`,
+            '/sistema/reforcos',
+          );
+        }
+      }
+      return ref.id;
+    },
+    [militares, afastamentos, escalasOrdinarias, escalasExtraordinarias, usuarios, funcoes, usuarioAtual, notificar],
+  );
+
+  /**
+   * Atender NUNCA mexe na escala do sistema — gera um Afastamento pro
+   * militar empenhado, que já o torna indisponível na própria UBM nesse
+   * período. O motivo (e o comportamento de equidade que ele carrega)
+   * depende do tipo da solicitação — ver nota em `SolicitacaoReforco`:
+   * 'escala_extraordinaria' vira motivo 'reforco_crb_cop' (descanso
+   * reconhecido, sem fila de recuperação, conta no teto mensal de
+   * extraordinárias); 'missao' vira motivo 'missao_externa' (para a
+   * contagem e gera fila de recuperação, sem teto mensal — orçamento
+   * próprio).
+   */
+  const responderSolicitacaoReforco = useCallback(
+    async (id: string, decisao: { atender: boolean; militarId?: string }) => {
+      const db = requireDb();
+      const solicitacao = solicitacoesReforco.find((s) => s.id === id);
+      if (!solicitacao) throw new Error('Solicitação de reforço não encontrada.');
+
+      const militarFinalId = decisao.atender ? decisao.militarId ?? solicitacao.militarSugeridoId : undefined;
+
+      if (decisao.atender) {
+        const militarFinal = militarFinalId;
+        if (!militarFinal) throw new Error('Nenhum militar selecionado pra atender essa solicitação.');
+        if (
+          solicitacao.tipo === 'escala_extraordinaria' &&
+          extraordinariasNoMes(militarFinal, solicitacao.data, escalasExtraordinarias, afastamentos) >= LIMITE_EXTRAORDINARIAS_POR_MES
+        ) {
+          throw new Error(`Esse militar já atingiu o limite de ${LIMITE_EXTRAORDINARIAS_POR_MES} extraordinárias no mês.`);
+        }
+
+        const comando = comandos.find((c) => c.id === solicitacao.comandoId);
+        await addDoc(collection(db, 'afastamentos'), {
+          militarId: militarFinal,
+          ubmId: solicitacao.ubmId,
+          motivo: solicitacao.tipo === 'missao' ? 'missao_externa' : 'reforco_crb_cop',
+          detalhe: `${comando ? `${comando.sigla} — ` : ''}${solicitacao.motivo}`,
+          dataInicio: solicitacao.data,
+          dataFim: solicitacao.data,
+          origemReforcoId: id,
+          criadoPorId: usuarioAtual?.id ?? '',
+          criado_em: new Date().toISOString(),
+        });
+
+        await updateDoc(doc(db, 'solicitacoes_reforco', id), {
+          status: 'atendida' as StatusSolicitacaoReforco,
+          militarId: militarFinal,
+          atendidoPorId: usuarioAtual?.id ?? '',
+          atendido_em: new Date().toISOString(),
+        });
+
+        // Só a partir de agora o CRB/COP passa a enxergar o militar — antes
+        // de atendida, a sugestão automática (militarSugeridoId) fica visível
+        // só pra UBM. E o militar já entra na "escala do comando" com a
+        // indicação de qual UBM o cedeu.
+        const funcaoNome = funcoes.find((f) => f.id === solicitacao.funcao)?.nome ?? 'Função removida';
+        await addDoc(collection(db, 'escalas_comando'), {
+          comandoId: solicitacao.comandoId,
+          militarId: militarFinal,
+          ubmOrigemId: solicitacao.ubmId,
+          funcaoNome,
+          data: solicitacao.data,
+          motivo: solicitacao.motivo,
+          origemReforcoId: id,
+          criado_em: new Date().toISOString(),
+        });
+
+        const usuarioMilitar = usuarios.find((u) => u.militarId === militarFinal);
+        if (usuarioMilitar) {
+          const dataBr = formatarDataBr(solicitacao.data);
+          await notificar(
+            usuarioMilitar.id,
+            'reforco_atendido',
+            `Você foi empenhado num reforço solicitado pelo CRB/COP para ${dataBr}.`,
+            '/sistema/afastamentos',
+          );
+          try {
+            await enviarEmail({
+              to: usuarioMilitar.email,
+              subject: 'Você foi escalado para um reforço — GESOP',
+              html: `<p>Você foi empenhado(a) num reforço solicitado pelo CRB/COP — <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+            });
+          } catch (erroEnvio) {
+            console.error('Erro ao enviar e-mail de reforço atendido:', erroEnvio);
+          }
+        }
+      } else {
+        await updateDoc(doc(db, 'solicitacoes_reforco', id), {
+          status: 'recusada' as StatusSolicitacaoReforco,
+          atendidoPorId: usuarioAtual?.id ?? '',
+          atendido_em: new Date().toISOString(),
+        });
+      }
+
+      // Saiu da prévia: o sugerido original tinha recebido o aviso de
+      // sobreaviso na criação (ver criarSolicitacaoReforco) — se no fim não
+      // foi ele o confirmado (outro militar foi escolhido, ou a solicitação
+      // foi recusada), avisa por alerta E e-mail, já que não vale mais a
+      // pena ele se organizar pra esse reforço.
+      if (solicitacao.militarSugeridoId && solicitacao.militarSugeridoId !== militarFinalId) {
+        const usuarioSugeridoOriginal = usuarios.find((u) => u.militarId === solicitacao.militarSugeridoId);
+        if (usuarioSugeridoOriginal) {
+          const funcaoNome = funcoes.find((f) => f.id === solicitacao.funcao)?.nome ?? 'Função removida';
+          const dataBr = formatarDataBr(solicitacao.data);
+          await notificar(
+            usuarioSugeridoOriginal.id,
+            'reforco_previa',
+            `Você não foi mais o(a) escolhido(a) pro reforço de ${funcaoNome} em ${dataBr} — outro militar foi escalado ou a solicitação foi recusada.`,
+            '/sistema/reforcos',
+          );
+          try {
+            await enviarEmail({
+              to: usuarioSugeridoOriginal.email,
+              subject: 'Você saiu da prévia de um reforço — GESOP',
+              html: `<p>Você havia sido sugerido(a) pro reforço de <b>${funcaoNome}</b> em <b>${dataBr}</b>, mas não foi o(a) confirmado(a) — outro militar foi escalado ou a solicitação foi recusada.</p>`,
+            });
+          } catch (erroEnvio) {
+            console.error('Erro ao enviar e-mail de saída da prévia de reforço:', erroEnvio);
+          }
+        }
+      }
+
+      const comandoUsuarios = usuarios.filter(
+        (u) => u.comandoId === solicitacao.comandoId && (u.papeis?.includes('crb') || u.papeis?.includes('cop')),
+      );
+      const mensagem = decisao.atender ? 'A UBM atendeu sua solicitação de reforço.' : 'A UBM recusou sua solicitação de reforço.';
+      await Promise.all(comandoUsuarios.map((u) => notificar(u.id, 'reforco_atendido', mensagem, '/sistema/reforcos')));
+    },
+    [solicitacoesReforco, comandos, usuarios, funcoes, escalasExtraordinarias, usuarioAtual, notificar],
+  );
+
+  /**
+   * Reforço em massa: um único pedido do CRB/COP (ex.: 25 militares pra
+   * prevenção num jogo) que o sistema já reparte entre as UBMs subordinadas,
+   * proporcional ao efetivo ativo de cada uma (`distribuirProporcional`).
+   * Não cria vaga de voluntariado sozinho — cada UBM decide quando abrir a
+   * própria (`abrirVoluntariadoOperacaoUbm`).
+   */
+  const dispararSolicitacaoOperacao = useCallback(
+    async (dados: { comandoId: string; motivo: string; data: string; prazo: string; quantidadeTotal: number }) => {
+      const db = requireDb();
+      const comando = comandos.find((c) => c.id === dados.comandoId);
+      if (!comando) throw new Error('Comando não encontrado.');
+      if (dados.quantidadeTotal <= 0) throw new Error('Informe uma quantidade maior que zero.');
+
+      const pesos = comando.ubmIds.map((ubmId) => ({
+        id: ubmId,
+        peso: militares.filter((m) => m.ubmId === ubmId && m.ativo).length,
+      }));
+      const cotas = distribuirProporcional(dados.quantidadeTotal, pesos)
+        .filter((c) => c.quantidade > 0)
+        .map((c) => ({ ubmId: c.id, quantidade: c.quantidade }));
+      if (cotas.length === 0) {
+        throw new Error('Nenhuma UBM vinculada a este comando tem efetivo ativo pra receber cota.');
+      }
+
+      const ref = await addDoc(collection(db, 'solicitacoes_operacao'), {
+        comandoId: dados.comandoId,
+        motivo: dados.motivo,
+        data: dados.data,
+        prazo: dados.prazo,
+        quantidadeTotal: dados.quantidadeTotal,
+        cotas,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      await Promise.all(
+        cotas.map((cota) => {
+          const gestaoDaUbm = usuarios.filter(
+            (u) => u.ubmId === cota.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+          );
+          return Promise.all(
+            gestaoDaUbm.map((u) =>
+              notificar(
+                u.id,
+                'operacao_cota_recebida',
+                `Sua UBM recebeu cota de ${cota.quantidade} militar(es) para "${dados.motivo}" em ${dados.data}.`,
+                '/sistema/reforcos',
+              ),
+            ),
+          );
+        }),
+      );
+      return ref.id;
+    },
+    [comandos, militares, usuarios, usuarioAtual, notificar],
+  );
+
+  /** Escalante/comandante da UBM abre voluntariado pra própria cota — qualquer militar ativo é elegível (sem exigência de função). */
+  const abrirVoluntariadoOperacaoUbm = useCallback(
+    async (operacaoId: string) => {
+      const db = requireDb();
+      if (!usuarioAtual) throw new Error('Você precisa estar autenticado.');
+      const operacao = solicitacoesOperacao.find((o) => o.id === operacaoId);
+      if (!operacao) throw new Error('Solicitação de operação não encontrada.');
+      const ubmId = usuarioAtual.ubmId;
+      const cota = operacao.cotas.find((c) => c.ubmId === ubmId);
+      if (!cota) throw new Error('Sua UBM não recebeu cota nessa operação.');
+      const jaAberta = vagasVoluntariasOperacao.some((v) => v.operacaoId === operacaoId && v.ubmId === ubmId);
+      if (jaAberta) throw new Error('O voluntariado dessa cota já foi aberto.');
+
+      const elegiveis = militares.filter(
+        (m) => m.ubmId === ubmId && m.ativo && !estaAfastado(m.id, operacao.data, afastamentos),
+      );
+      if (elegiveis.length === 0) throw new Error('Nenhum militar ativo disponível nessa data pra abrir voluntariado.');
+
+      const ref = await addDoc(collection(db, 'vagas_voluntarias_operacao'), {
+        operacaoId,
+        ubmId,
+        comandoId: operacao.comandoId,
+        motivo: operacao.motivo,
+        data: operacao.data,
+        prazo: operacao.prazo,
+        quantidade: cota.quantidade,
+        status: 'aberta' as StatusVagaOperacao,
+        candidatosElegiveisIds: elegiveis.map((m) => m.id),
+        voluntariosIds: [],
+        criadoPorId: usuarioAtual.id,
+        criado_em: new Date().toISOString(),
+      });
+
+      const usuariosElegiveis = usuarios.filter((u) => u.militarId && elegiveis.some((m) => m.id === u.militarId));
+      await Promise.all(
+        usuariosElegiveis.map((u) =>
+          notificar(
+            u.id,
+            'vaga_operacao_disponivel',
+            `Reforço disponível pra voluntariado: ${cota.quantidade} vaga(s) para "${operacao.motivo}" em ${operacao.data}. Prazo: ${operacao.prazo}.`,
+            '/sistema/reforcos',
+          ),
+        ),
+      );
+      return ref.id;
+    },
+    [usuarioAtual, solicitacoesOperacao, vagasVoluntariasOperacao, militares, afastamentos, usuarios, notificar],
+  );
+
+  /**
+   * Voluntariado pra cota de operação — mesma lógica de ocupação imediata da
+   * vaga voluntária extraordinária (ver `voluntariarParaVaga`), mas sem
+   * checagem de função nem de teto mensal: é reforço tipo 'missao', com
+   * orçamento próprio.
+   */
+  const voluntariarParaOperacao = useCallback(
+    async (vagaId: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasOperacao.find((v) => v.id === vagaId);
+      const militarId = usuarioAtual?.militarId;
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (!militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
+      if (vaga.status !== 'aberta') throw new Error('Essa vaga já foi preenchida.');
+      if (vaga.voluntariosIds.length >= vaga.quantidade) throw new Error('Essa vaga já está completa.');
+      if (vaga.voluntariosIds.includes(militarId)) throw new Error('Você já se voluntariou pra essa vaga.');
+      if (!vaga.candidatosElegiveisIds.includes(militarId)) {
+        throw new Error('Você não está na lista de elegíveis pra essa vaga.');
+      }
+      // Reconfere no momento do voluntariado (não só quando a vaga abriu):
+      // evita dupla marcação de quem, entre a abertura desta vaga e agora,
+      // já se comprometeu com outra escala/missão na mesma data (inclusive
+      // outra operação concorrente).
+      if (estaAfastado(militarId, vaga.data, afastamentos)) {
+        throw new Error('Você já está afastado ou comprometido com outra escala/missão nessa data.');
+      }
+
+      const novosVoluntarios = [...vaga.voluntariosIds, militarId];
+      const novoStatus: StatusVagaOperacao = novosVoluntarios.length >= vaga.quantidade ? 'preenchida' : 'aberta';
+      try {
+        await updateDoc(doc(db, 'vagas_voluntarias_operacao', vagaId), {
+          status: novoStatus,
+          voluntariosIds: novosVoluntarios,
+        });
+      } catch {
+        throw new Error('Essa vaga já foi preenchida por outros voluntários.');
+      }
+
+      const comando = comandos.find((c) => c.id === vaga.comandoId);
+      await addDoc(collection(db, 'afastamentos'), {
+        militarId,
+        ubmId: vaga.ubmId,
+        motivo: 'missao_externa',
+        detalhe: `${comando ? `${comando.sigla} — ` : ''}${vaga.motivo}`,
+        dataInicio: vaga.data,
+        dataFim: vaga.data,
+        origemOperacaoVagaId: vagaId,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: new Date().toISOString(),
+      });
+
+      await addDoc(collection(db, 'escalas_comando'), {
+        comandoId: vaga.comandoId,
+        militarId,
+        ubmOrigemId: vaga.ubmId,
+        funcaoNome: 'Reforço de operação',
+        data: vaga.data,
+        motivo: vaga.motivo,
+        origemOperacaoVagaId: vagaId,
+        criado_em: new Date().toISOString(),
+      });
+
+      const dataBr = formatarDataBr(vaga.data);
+      await notificarMilitarEscalado(
+        militarId,
+        `Você se voluntariou e foi confirmado pra "${vaga.motivo}" em ${dataBr}.`,
+        'Você foi escalado — GESOP',
+        `<p>Você se voluntariou e foi confirmado(a) pra <b>${vaga.motivo}</b> em <b>${dataBr}</b>.</p>`,
+      );
+      if (novoStatus === 'preenchida') {
+        const gestaoDaUbm = usuarios.filter(
+          (u) => u.ubmId === vaga.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+        );
+        await Promise.all(
+          gestaoDaUbm.map((u) =>
+            notificar(
+              u.id,
+              'vaga_operacao_resolvida',
+              `A cota de "${vaga.motivo}" em ${vaga.data} foi totalmente preenchida por voluntariado.`,
+              '/sistema/reforcos',
+            ),
+          ),
         );
       }
     },
-    [solicitacoesAlteracaoDiferenciada, usuarios, usuarioAtual, notificar],
+    [vagasVoluntariasOperacao, afastamentos, usuarios, comandos, usuarioAtual, notificar, notificarMilitarEscalado],
+  );
+
+  /**
+   * Militar desiste de um voluntariado antes da resolução final: reabre a
+   * vaga (volta pra 'aberta', mesmo se já estava 'preenchida') e remove o
+   * próprio afastamento e o próprio registro na escala do comando — só os
+   * dele, os outros voluntários da mesma vaga não são afetados. Não é mais
+   * possível depois que a vaga foi completada compulsoriamente (aí a
+   * decisão já não é mais dele).
+   */
+  const desistirVoluntariadoOperacao = useCallback(
+    async (vagaId: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasOperacao.find((v) => v.id === vagaId);
+      const militarId = usuarioAtual?.militarId;
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (!militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
+      if (!vaga.voluntariosIds.includes(militarId)) throw new Error('Você não é voluntário dessa vaga.');
+      if (vaga.status === 'expirada_compulsoria') {
+        throw new Error('Essa vaga já foi resolvida compulsoriamente — não é mais possível desistir por aqui.');
+      }
+
+      await updateDoc(doc(db, 'vagas_voluntarias_operacao', vagaId), {
+        status: 'aberta' as StatusVagaOperacao,
+        voluntariosIds: vaga.voluntariosIds.filter((id) => id !== militarId),
+      });
+
+      const afastamentoProprio = afastamentos.find((a) => a.militarId === militarId && a.origemOperacaoVagaId === vagaId);
+      if (afastamentoProprio) {
+        await deleteDoc(doc(db, 'afastamentos', afastamentoProprio.id));
+      }
+      const escalaComandoPropria = escalasComando.find((e) => e.militarId === militarId && e.origemOperacaoVagaId === vagaId);
+      if (escalaComandoPropria) {
+        await deleteDoc(doc(db, 'escalas_comando', escalaComandoPropria.id));
+      }
+
+      const gestaoDaUbm = usuarios.filter(
+        (u) => u.ubmId === vaga.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+      );
+      await Promise.all(
+        gestaoDaUbm.map((u) =>
+          notificar(
+            u.id,
+            'vaga_operacao_disponivel',
+            `Um voluntário desistiu de "${vaga.motivo}" em ${vaga.data} — a vaga reabriu.`,
+            '/sistema/reforcos',
+          ),
+        ),
+      );
+    },
+    [vagasVoluntariasOperacao, afastamentos, escalasComando, usuarios, usuarioAtual, notificar],
+  );
+
+  /** Prazo esgotado com posições sobrando: completa compulsoriamente priorizando quem tem menos reforços/missões recentes (fila de fairness simples, sem exigência de função). */
+  const resolverOperacaoCompulsoriamente = useCallback(
+    async (vagaId: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasOperacao.find((v) => v.id === vagaId);
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (vaga.status !== 'aberta') throw new Error('Essa vaga já foi resolvida.');
+
+      const faltam = vaga.quantidade - vaga.voluntariosIds.length;
+      if (faltam <= 0) throw new Error('Essa vaga já está completa.');
+
+      const contagemReforcos = new Map<string, number>();
+      afastamentos.forEach((a) => {
+        if (a.motivo === 'missao_externa' || a.motivo === 'reforco_crb_cop') {
+          contagemReforcos.set(a.militarId, (contagemReforcos.get(a.militarId) ?? 0) + 1);
+        }
+      });
+
+      const elegiveis = vaga.candidatosElegiveisIds
+        .filter((id) => !vaga.voluntariosIds.includes(id) && !estaAfastado(id, vaga.data, afastamentos))
+        .map((id) => militares.find((m) => m.id === id))
+        .filter((m): m is Militar => !!m)
+        .sort((a, b) => {
+          const diferenca = (contagemReforcos.get(a.id) ?? 0) - (contagemReforcos.get(b.id) ?? 0);
+          if (diferenca !== 0) return diferenca;
+          return a.nome.localeCompare(b.nome);
+        });
+
+      const escolhidos = elegiveis.slice(0, faltam);
+      if (escolhidos.length < faltam) {
+        throw new Error('Não há militares elegíveis suficientes pra completar essa cota compulsoriamente.');
+      }
+
+      await updateDoc(doc(db, 'vagas_voluntarias_operacao', vagaId), {
+        status: 'expirada_compulsoria' as StatusVagaOperacao,
+        militaresCompulsoriosIds: escolhidos.map((m) => m.id),
+        resolvido_em: new Date().toISOString(),
+      });
+
+      const comando = comandos.find((c) => c.id === vaga.comandoId);
+      const dataBr = formatarDataBr(vaga.data);
+      await Promise.all(
+        escolhidos.map(async (m) => {
+          await addDoc(collection(db, 'afastamentos'), {
+            militarId: m.id,
+            ubmId: vaga.ubmId,
+            motivo: 'missao_externa',
+            detalhe: `${comando ? `${comando.sigla} — ` : ''}${vaga.motivo}`,
+            dataInicio: vaga.data,
+            dataFim: vaga.data,
+            origemOperacaoVagaId: vagaId,
+            criadoPorId: usuarioAtual?.id ?? '',
+            criado_em: new Date().toISOString(),
+          });
+          await addDoc(collection(db, 'escalas_comando'), {
+            comandoId: vaga.comandoId,
+            militarId: m.id,
+            ubmOrigemId: vaga.ubmId,
+            funcaoNome: 'Reforço de operação',
+            data: vaga.data,
+            motivo: vaga.motivo,
+            origemOperacaoVagaId: vagaId,
+            criado_em: new Date().toISOString(),
+          });
+          await notificarMilitarEscalado(
+            m.id,
+            `Ninguém se voluntariou a tempo — você foi escalado compulsoriamente pra "${vaga.motivo}" em ${dataBr}.`,
+            'Você foi escalado — GESOP',
+            `<p>Ninguém se voluntariou a tempo — você foi escalado(a) compulsoriamente pra <b>${vaga.motivo}</b> em <b>${dataBr}</b>.</p>`,
+          );
+        }),
+      );
+    },
+    [vagasVoluntariasOperacao, militares, afastamentos, comandos, usuarioAtual, notificarMilitarEscalado],
+  );
+
+  // --- Escala diferenciada ---------------------------------------------------
+  const criarEscalaDiferenciada = useCallback(
+    async (dados: { militarId: string; ubmId: string; funcao: string; data: string; observacao?: string }) => {
+      const db = requireDb();
+      const agora = new Date().toISOString();
+
+      // Se já existe uma escala ordinária nesse dia/função (de uma geração
+      // anterior), o dia diferenciado assume esse mesmo registro em vez de
+      // duplicar — só um militar por dia/função.
+      const existente = escalasOrdinarias.find(
+        (e) => e.ubmId === dados.ubmId && e.funcao === dados.funcao && e.data === dados.data,
+      );
+
+      let escalaOrdinariaId: string;
+      if (existente) {
+        escalaOrdinariaId = existente.id;
+        await updateDoc(doc(db, 'escalas_ordinarias', existente.id), {
+          militarId: dados.militarId,
+          origem: 'diferenciada',
+        });
+      } else {
+        const refOrdinaria = await addDoc(collection(db, 'escalas_ordinarias'), {
+          ubmId: dados.ubmId,
+          funcao: dados.funcao,
+          data: dados.data,
+          militarId: dados.militarId,
+          origem: 'diferenciada',
+          criado_em: agora,
+        });
+        escalaOrdinariaId = refOrdinaria.id;
+      }
+
+      await addDoc(collection(db, 'escalas_diferenciadas'), {
+        ...semIndefinidosParaCriar(dados),
+        escalaOrdinariaId,
+        criadoPorId: usuarioAtual?.id ?? '',
+        criado_em: agora,
+      });
+
+      const funcaoNome = funcoes.find((f) => f.id === dados.funcao)?.nome ?? 'função removida';
+      const dataBr = formatarDataBr(dados.data);
+      await notificarMilitarEscalado(
+        dados.militarId,
+        `Você foi escalado(a) numa escala diferenciada de ${funcaoNome} em ${dataBr}.`,
+        'Você foi escalado — GESOP',
+        `<p>Você foi escalado(a) numa escala diferenciada de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+      );
+    },
+    [usuarioAtual, escalasOrdinarias, funcoes, notificarMilitarEscalado],
+  );
+
+  const atualizarEscalaDiferenciada = useCallback(
+    async (id: string, dados: { militarId?: string; funcao?: string; data?: string; observacao?: string }) => {
+      const db = requireDb();
+      const atual = escalasDiferenciadas.find((e) => e.id === id);
+      if (!atual) throw new Error('Escala diferenciada não encontrada.');
+
+      await updateDoc(doc(db, 'escalas_diferenciadas', id), semIndefinidosParaAtualizar(dados));
+      await updateDoc(
+        doc(db, 'escalas_ordinarias', atual.escalaOrdinariaId),
+        semIndefinidosParaAtualizar({ militarId: dados.militarId, funcao: dados.funcao, data: dados.data }),
+      );
+
+      if (dados.militarId) {
+        const funcaoId = dados.funcao ?? atual.funcao;
+        const dataFinal = dados.data ?? atual.data;
+        const funcaoNome = funcoes.find((f) => f.id === funcaoId)?.nome ?? 'função removida';
+        const dataBr = formatarDataBr(dataFinal);
+        await notificarMilitarEscalado(
+          dados.militarId,
+          `Você foi escalado(a) numa escala diferenciada de ${funcaoNome} em ${dataBr}.`,
+          'Você foi escalado — GESOP',
+          `<p>Você foi escalado(a) numa escala diferenciada de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+        );
+        if (atual.militarId !== dados.militarId) {
+          await notificarMilitarEscalado(
+            atual.militarId,
+            `Você foi removido(a) da escala diferenciada de ${funcaoNome} em ${dataBr} (substituído).`,
+            'Você foi removido de uma escala — GESOP',
+            `<p>Você foi removido(a) da escala diferenciada de <b>${funcaoNome}</b> em <b>${dataBr}</b> (substituído).</p>`,
+            'removido_da_escala',
+          );
+        }
+      }
+    },
+    [escalasDiferenciadas, funcoes, notificarMilitarEscalado],
+  );
+
+  const removerEscalaDiferenciada = useCallback(
+    async (id: string) => {
+      const db = requireDb();
+      const atual = escalasDiferenciadas.find((e) => e.id === id);
+      if (atual) {
+        await deleteDoc(doc(db, 'escalas_ordinarias', atual.escalaOrdinariaId)).catch(() => undefined);
+      }
+      await deleteDoc(doc(db, 'escalas_diferenciadas', id));
+      if (atual) {
+        const funcaoNome = funcoes.find((f) => f.id === atual.funcao)?.nome ?? 'função removida';
+        const dataBr = formatarDataBr(atual.data);
+        await notificarMilitarEscalado(
+          atual.militarId,
+          `Você foi removido(a) da escala diferenciada de ${funcaoNome} em ${dataBr}.`,
+          'Você foi removido de uma escala — GESOP',
+          `<p>Você foi removido(a) da escala diferenciada de <b>${funcaoNome}</b> em <b>${dataBr}</b>.</p>`,
+          'removido_da_escala',
+        );
+      }
+    },
+    [escalasDiferenciadas, funcoes, notificarMilitarEscalado],
+  );
+
+  // --- Fechamento / Histórico de escala --------------------------------------
+  const fecharEscalaSemana = useCallback(
+    async (params: { ubmId: string; tipo: TipoEscalaServico; semanaInicio: string }) => {
+      const db = requireDb();
+      const docId = `${params.ubmId}_${params.tipo}_${params.semanaInicio}`;
+      const atual = fechamentosEscala.find((f) => f.id === docId);
+      const novaVersao = (atual?.versaoAtual ?? 0) + 1;
+      const agora = new Date().toISOString();
+
+      const dias = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(`${params.semanaInicio}T00:00:00`);
+        d.setDate(d.getDate() + i);
+        return d.toISOString().slice(0, 10);
+      });
+      const escalas = params.tipo === 'ordinaria' ? escalasOrdinarias : escalasExtraordinarias;
+      const linhas = escalas
+        .filter((e) => e.ubmId === params.ubmId && dias.includes(e.data))
+        .map((e) => ({
+          funcaoId: e.funcao,
+          funcaoNome: funcoes.find((f) => f.id === e.funcao)?.nome ?? 'Função removida',
+          data: e.data,
+          militarNome: (() => {
+            const militar = militares.find((m) => m.id === e.militarId);
+            return militar ? `${militar.posto} ${militar.nome}`.trim() : 'Militar removido';
+          })(),
+          ...('motivo' in e && e.motivo ? { motivo: e.motivo } : {}),
+        }));
+
+      await setDoc(
+        doc(db, 'fechamentos_escala', docId),
+        {
+          ubmId: params.ubmId,
+          tipo: params.tipo,
+          semanaInicio: params.semanaInicio,
+          travada: true,
+          versaoAtual: novaVersao,
+          fechadoPorId: usuarioAtual?.id ?? '',
+          fechado_em: agora,
+        },
+        { merge: true },
+      );
+
+      await addDoc(collection(db, 'historico_escalas'), {
+        ubmId: params.ubmId,
+        tipo: params.tipo,
+        semanaInicio: params.semanaInicio,
+        versao: novaVersao,
+        linhas,
+        fechadoPorId: usuarioAtual?.id ?? '',
+        fechado_em: agora,
+      });
+    },
+    [fechamentosEscala, escalasOrdinarias, escalasExtraordinarias, funcoes, militares, usuarioAtual],
+  );
+
+  const reabrirEscalaSemana = useCallback(
+    async (params: { ubmId: string; tipo: TipoEscalaServico; semanaInicio: string }) => {
+      const db = requireDb();
+      const docId = `${params.ubmId}_${params.tipo}_${params.semanaInicio}`;
+      await setDoc(
+        doc(db, 'fechamentos_escala', docId),
+        {
+          ubmId: params.ubmId,
+          tipo: params.tipo,
+          semanaInicio: params.semanaInicio,
+          travada: false,
+          reabertoPorId: usuarioAtual?.id ?? '',
+          reaberto_em: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+    },
+    [usuarioAtual],
   );
 
   // --- Afastamentos ---------------------------------------------------------
@@ -673,20 +2314,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [presencas, usuarioAtual],
   );
 
-  // --- Solicitações de serviço (substituição / permuta) --------------------
+  // --- Solicitações de serviço (Autorização de Substituição) ---------------
   const criarSolicitacaoServico = useCallback(
     async (dados: {
       ubmId: string;
-      tipo: TipoSolicitacaoServico;
+      modalidade: ModalidadeSolicitacaoServico;
+      horarioParcial?: string;
+      localEvento?: string;
       escalaOrigemId: string;
       tipoEscalaOrigem: TipoEscalaServico;
-      escalaDestinoId?: string;
       indicadoId: string;
       motivo?: string;
     }) => {
       const db = requireDb();
       const ref = await addDoc(collection(db, 'solicitacoes_servico'), {
-        ...dados,
+        ...semIndefinidosParaCriar(dados),
         solicitanteId: usuarioAtual?.id ?? '',
         status: 'aguardando_indicado' as StatusSolicitacaoServico,
         criado_em: new Date().toISOString(),
@@ -697,8 +2339,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         await notificar(
           indicado.id,
           'solicitacao_servico',
-          `Você recebeu um pedido de ${dados.tipo === 'permuta' ? 'permuta' : 'substituição'} de escala.`,
-          `/sistema/solicitacoes/${ref.id}`,
+          'Você recebeu um pedido de autorização de substituição de escala.',
+          `/sistema/solicitacoes`,
         );
       }
     },
@@ -712,60 +2354,46 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (!solicitacao) throw new Error('Solicitação não encontrada.');
 
       await updateDoc(doc(db, 'solicitacoes_servico', id), {
-        status: aceitar ? 'aguardando_escalante' : 'recusada_indicado',
+        status: aceitar ? 'aguardando_aprovacao' : 'recusada_indicado',
         respondido_em: new Date().toISOString(),
       });
 
-      const escalantes = usuarios.filter(
-        (u) => u.ubmId === solicitacao.ubmId && u.papeis?.includes('escalante'),
+      const aprovadores = usuarios.filter(
+        (u) => u.ubmId === solicitacao.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
       );
       const solicitante = usuarios.find((u) => u.id === solicitacao.solicitanteId);
 
       if (aceitar) {
         await Promise.all(
-          escalantes.map((e) =>
-            notificar(e.id, 'aprovacao_escalante', 'Uma solicitação de serviço aguarda sua aprovação.', `/sistema/solicitacoes/${id}`),
+          aprovadores.map((a) =>
+            notificar(a.id, 'aprovacao_escalante', 'Uma autorização de substituição aguarda sua aprovação.', `/sistema/solicitacoes`),
           ),
         );
       } else if (solicitante) {
-        await notificar(solicitante.id, 'solicitacao_servico', 'Sua solicitação de serviço foi recusada pelo militar indicado.');
+        await notificar(solicitante.id, 'solicitacao_servico', 'Seu pedido de autorização de substituição foi recusado pelo militar indicado.');
       }
     },
     [solicitacoesServico, usuarios, notificar],
   );
 
-  const responderSolicitacaoEscalante = useCallback(
+  /** Aprovação final — pelo Comandante OU pelo Escalante da UBM. NUNCA altera o registro de escala gerado pelo sistema (ver nota em types.ts): só o escalante muda a escala, e sempre manualmente. */
+  const responderSolicitacaoAprovador = useCallback(
     async (id: string, aprovar: boolean) => {
       const db = requireDb();
       const solicitacao = solicitacoesServico.find((s) => s.id === id);
       if (!solicitacao) throw new Error('Solicitação não encontrada.');
 
       await updateDoc(doc(db, 'solicitacoes_servico', id), {
-        status: aprovar ? 'aprovada' : 'recusada_escalante',
+        status: aprovar ? 'aprovada' : 'recusada_aprovacao',
         aprovadoPorId: usuarioAtual?.id ?? '',
         respondido_em: new Date().toISOString(),
       });
 
-      if (aprovar) {
-        const colecaoOrigem = solicitacao.tipoEscalaOrigem === 'ordinaria' ? 'escalas_ordinarias' : 'escalas_extraordinarias';
-        // Substituição: a vaga do solicitante passa a ser do indicado.
-        await updateDoc(doc(db, colecaoOrigem, solicitacao.escalaOrigemId), {
-          militarId: solicitacao.indicadoId,
-        });
-
-        // Permuta: também troca a vaga do indicado para o solicitante.
-        if (solicitacao.tipo === 'permuta' && solicitacao.escalaDestinoId) {
-          await updateDoc(doc(db, colecaoOrigem, solicitacao.escalaDestinoId), {
-            militarId: solicitacao.solicitanteId,
-          });
-        }
-      }
-
       const solicitante = usuarios.find((u) => u.id === solicitacao.solicitanteId);
       const indicado = usuarios.find((u) => u.id === solicitacao.indicadoId);
       const mensagem = aprovar
-        ? 'Sua solicitação de serviço foi aprovada pelo escalante e já está refletida na escala.'
-        : 'Sua solicitação de serviço foi recusada pelo escalante.';
+        ? 'Sua autorização de substituição foi aprovada — o PDF já pode ser gerado. A escala do sistema não muda automaticamente; no dia, o CMT de SOS registra a presença do substituto.'
+        : 'Seu pedido de autorização de substituição foi recusado.';
       if (solicitante) await notificar(solicitante.id, 'solicitacao_servico', mensagem);
       if (indicado) await notificar(indicado.id, 'solicitacao_servico', mensagem);
     },
@@ -778,18 +2406,32 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     await updateDoc(doc(db, 'alertas', id), { lida: true });
   }, []);
 
+  const deleteAlerta = useCallback(async (id: string) => {
+    const db = requireDb();
+    await deleteDoc(doc(db, 'alertas', id));
+  }, []);
+
   const valor = useMemo<AppContextData>(
     () => ({
       ubms,
+      comandos,
       usuarios,
       militares,
+      funcoes,
       escalasOrdinarias,
       escalasExtraordinarias,
       escalasDiferenciadas,
-      solicitacoesAlteracaoDiferenciada,
+      vagasVoluntariasExtraordinarias,
       afastamentos,
       presencas,
       solicitacoesServico,
+      solicitacoesReforco,
+      solicitacoesRemanejamento,
+      solicitacoesOperacao,
+      vagasVoluntariasOperacao,
+      escalasComando,
+      fechamentosEscala,
+      historicoEscalas,
       alertas,
       usuarioAtual,
       isAuthenticated,
@@ -799,8 +2441,19 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       logout,
       solicitarAcesso,
       enviarResetSenha,
+      atualizarMeuPerfil,
+      ativarNotificacoesPushNoDispositivo,
+      solicitarRemanejamentoFuncao,
+      responderRemanejamento,
+      validarMatriculaEfetivo,
+      buscarMilitaresEfetivoPorNome,
+      primeiroAcessoPorMatricula,
       addUbm,
       updateUbm,
+      addComando,
+      updateComando,
+      deleteComando,
+      vincularUbmAoComando,
       updateUsuario,
       addUsuario,
       deleteUsuario,
@@ -809,34 +2462,63 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       updateMilitar,
       transferirMilitarDeUbm,
       deleteMilitar,
+      addFuncao,
+      updateFuncao,
+      deleteFuncao,
+      moverOrdemFuncao,
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
+      moverDataEscalaOrdinaria,
+      adicionarEscalaOrdinaria,
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
-      solicitarEscalaDiferenciada,
+      deleteEscalaExtraordinaria,
+      dispararVagaVoluntariaExtraordinaria,
+      voluntariarParaVaga,
+      desistirVoluntariadoExtraordinaria,
+      resolverVagaCompulsoriamente,
+      criarEscalaDiferenciada,
+      atualizarEscalaDiferenciada,
       removerEscalaDiferenciada,
-      solicitarAlteracaoDiferenciada,
-      responderAlteracaoDiferenciada,
+      fecharEscalaSemana,
+      reabrirEscalaSemana,
       addAfastamento,
       deleteAfastamento,
       registrarPresenca,
       criarSolicitacaoServico,
       responderSolicitacaoIndicado,
-      responderSolicitacaoEscalante,
+      responderSolicitacaoAprovador,
+      criarSolicitacaoReforco,
+      responderSolicitacaoReforco,
+      dispararSolicitacaoOperacao,
+      abrirVoluntariadoOperacaoUbm,
+      voluntariarParaOperacao,
+      desistirVoluntariadoOperacao,
+      resolverOperacaoCompulsoriamente,
       marcarAlertaLida,
+      deleteAlerta,
     }),
     [
       ubms,
+      comandos,
       usuarios,
       militares,
+      funcoes,
       escalasOrdinarias,
       escalasExtraordinarias,
       escalasDiferenciadas,
-      solicitacoesAlteracaoDiferenciada,
+      vagasVoluntariasExtraordinarias,
       afastamentos,
       presencas,
       solicitacoesServico,
+      solicitacoesReforco,
+      solicitacoesRemanejamento,
+      solicitacoesOperacao,
+      vagasVoluntariasOperacao,
+      escalasComando,
+      fechamentosEscala,
+      historicoEscalas,
       alertas,
       usuarioAtual,
       isAuthenticated,
@@ -845,8 +2527,19 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       logout,
       solicitarAcesso,
       enviarResetSenha,
+      atualizarMeuPerfil,
+      ativarNotificacoesPushNoDispositivo,
+      solicitarRemanejamentoFuncao,
+      responderRemanejamento,
+      validarMatriculaEfetivo,
+      buscarMilitaresEfetivoPorNome,
+      primeiroAcessoPorMatricula,
       addUbm,
       updateUbm,
+      addComando,
+      updateComando,
+      deleteComando,
+      vincularUbmAoComando,
       updateUsuario,
       addUsuario,
       deleteUsuario,
@@ -855,22 +2548,42 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       updateMilitar,
       transferirMilitarDeUbm,
       deleteMilitar,
+      addFuncao,
+      updateFuncao,
+      deleteFuncao,
+      moverOrdemFuncao,
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
+      moverDataEscalaOrdinaria,
+      adicionarEscalaOrdinaria,
       deleteEscalaOrdinaria,
       criarEscalaExtraordinaria,
       alterarMilitarExtraordinaria,
-      solicitarEscalaDiferenciada,
+      deleteEscalaExtraordinaria,
+      dispararVagaVoluntariaExtraordinaria,
+      voluntariarParaVaga,
+      desistirVoluntariadoExtraordinaria,
+      resolverVagaCompulsoriamente,
+      criarEscalaDiferenciada,
+      atualizarEscalaDiferenciada,
       removerEscalaDiferenciada,
-      solicitarAlteracaoDiferenciada,
-      responderAlteracaoDiferenciada,
+      fecharEscalaSemana,
+      reabrirEscalaSemana,
       addAfastamento,
       deleteAfastamento,
       registrarPresenca,
       criarSolicitacaoServico,
       responderSolicitacaoIndicado,
-      responderSolicitacaoEscalante,
+      responderSolicitacaoAprovador,
+      criarSolicitacaoReforco,
+      responderSolicitacaoReforco,
+      dispararSolicitacaoOperacao,
+      abrirVoluntariadoOperacaoUbm,
+      voluntariarParaOperacao,
+      desistirVoluntariadoOperacao,
+      resolverOperacaoCompulsoriamente,
       marcarAlertaLida,
+      deleteAlerta,
     ],
   );
 
