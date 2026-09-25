@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { User, Mail, IdCard, Building2, Lock, Send } from 'lucide-react';
+import { User, Mail, IdCard, Building2, Lock, Send, Bell } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import FormField from '../../components/ui/FormField';
 import { PAPEL_LABELS, STATUS_REMANEJAMENTO_LABELS } from '../../types';
+import { pushConfigurado, statusPermissaoPush } from '../../lib/pushNotifications';
 
-/** Autoedição do próprio perfil (nome de guerra + troca de senha) e solicitação de remanejamento/alteração de função ao escalante. */
+/** Autoedição do próprio perfil (nome de guerra + troca de senha), notificações push e solicitação de remanejamento/alteração de função ao escalante. */
 export default function MeuPerfil() {
   const {
     usuarioAtual,
@@ -14,6 +15,7 @@ export default function MeuPerfil() {
     militares,
     solicitacoesRemanejamento,
     atualizarMeuPerfil,
+    ativarNotificacoesPushNoDispositivo,
     solicitarRemanejamentoFuncao,
     enviarResetSenha,
   } = useApp();
@@ -34,6 +36,10 @@ export default function MeuPerfil() {
 
   const [enviandoReset, setEnviandoReset] = useState(false);
   const [mensagemReset, setMensagemReset] = useState<string | null>(null);
+
+  const [statusPush, setStatusPush] = useState(statusPermissaoPush());
+  const [ativandoPush, setAtivandoPush] = useState(false);
+  const [mensagemPush, setMensagemPush] = useState<string | null>(null);
 
   const [formRemanejamento, setFormRemanejamento] = useState({ funcaoDesejadaId: '', motivo: '' });
   const [enviandoRemanejamento, setEnviandoRemanejamento] = useState(false);
@@ -64,6 +70,24 @@ export default function MeuPerfil() {
       setMensagemReset(erro instanceof Error ? erro.message : 'Não foi possível enviar o link.');
     } finally {
       setEnviandoReset(false);
+    }
+  };
+
+  const handleAtivarPush = async () => {
+    setAtivandoPush(true);
+    setMensagemPush(null);
+    try {
+      const ativou = await ativarNotificacoesPushNoDispositivo();
+      setStatusPush(statusPermissaoPush());
+      setMensagemPush(
+        ativou
+          ? 'Notificações push ativadas neste navegador.'
+          : 'Não foi possível ativar — permissão negada ou o navegador não suporta.',
+      );
+    } catch (erro) {
+      setMensagemPush(erro instanceof Error ? erro.message : 'Não foi possível ativar as notificações push.');
+    } finally {
+      setAtivandoPush(false);
     }
   };
 
@@ -142,6 +166,30 @@ export default function MeuPerfil() {
           {enviandoReset ? 'Enviando...' : 'Enviar link de redefinição de senha'}
         </button>
       </div>
+
+      {/* Notificações push — sempre por clique explícito, nunca automático. */}
+      {pushConfigurado && (
+        <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-gray-700 dark:text-slate-300 flex items-center gap-2"><Bell className="w-4 h-4" /> Notificações push</h2>
+          <p className="text-sm text-gray-500 dark:text-slate-400">
+            Receba um aviso na tela mesmo com o sistema fechado, além do alerta interno e do e-mail que você já recebe.
+          </p>
+          {statusPush === 'granted' ? (
+            <p className="text-sm text-emerald-700 dark:text-emerald-400">Ativadas neste navegador.</p>
+          ) : statusPush === 'denied' ? (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              Bloqueadas nas configurações do navegador — pra ativar, libere notificações pra este site manualmente e recarregue a página.
+            </p>
+          ) : statusPush === 'indisponivel' ? (
+            <p className="text-sm text-gray-400">Este navegador não suporta notificações push.</p>
+          ) : (
+            <button onClick={handleAtivarPush} disabled={ativandoPush} className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50">
+              {ativandoPush ? 'Ativando...' : 'Ativar notificações push neste dispositivo'}
+            </button>
+          )}
+          {mensagemPush && <p className="text-sm text-gray-600 dark:text-slate-400">{mensagemPush}</p>}
+        </div>
+      )}
 
       {/* Remanejamento de função — pedido ao escalante, não se aplica sozinho. */}
       {militar && (

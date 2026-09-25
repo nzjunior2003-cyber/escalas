@@ -17,6 +17,7 @@ import {
 } from 'firebase/auth';
 import {
   addDoc,
+  arrayUnion,
   collection,
   deleteDoc,
   deleteField,
@@ -40,6 +41,7 @@ import {
   requireFirebaseAuth,
 } from '../lib/firebase';
 import { enviarEmail } from '../lib/emailService';
+import { enviarPush } from '../lib/pushService';
 import {
   LIMITE_EXTRAORDINARIAS_POR_MES,
   distribuirProporcional,
@@ -51,6 +53,7 @@ import {
   temFolga24hAntes,
 } from '../lib/escala';
 import { buscarMilitarPorMatricula, buscarMilitaresPorNome, normalizarMatricula } from '../lib/planilhaEfetivo';
+import { ativarNotificacoesPush } from '../lib/pushNotifications';
 import type { LinhaMilitar } from '../lib/csvMilitares';
 import {
   Afastamento,
@@ -127,6 +130,8 @@ interface AppContextData {
   enviarResetSenha: (email: string) => Promise<void>;
   /** Autoedição do próprio perfil — só o nome de guerra da conta (não altera o cadastro de efetivo). */
   atualizarMeuPerfil: (dados: { nomeGuerra: string }) => Promise<void>;
+  /** Pede permissão de notificação push neste dispositivo; `false` se negada/indisponível (nunca lança por isso). */
+  ativarNotificacoesPushNoDispositivo: () => Promise<boolean>;
   solicitarRemanejamentoFuncao: (dados: { funcaoDesejadaId: string; motivo: string }) => Promise<void>;
   responderRemanejamento: (id: string, aprovado: boolean) => Promise<void>;
   /** Confere a matrícula contra a planilha ao vivo do efetivo do CBMPA. */
@@ -460,8 +465,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       } catch (erro) {
         console.error('Erro ao criar alerta:', erro);
       }
+
+      // Push no navegador (ver pushNotifications.ts/pushService.ts) — só se
+      // o destinatário tiver ativado em Meu Perfil. Nunca aguardado: falha
+      // de push não pode atrasar nem derrubar quem chamou notificar(), o
+      // alerta interno acima já é a garantia mínima.
+      const destinatario = usuarios.find((u) => u.id === usuarioId);
+      if (destinatario?.fcmTokens?.length) {
+        void enviarPush({ tokens: destinatario.fcmTokens, title: 'GESOP', body: mensagem, link });
+      }
     },
-    [],
+    [usuarios],
   );
 
   /**
@@ -732,6 +746,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     },
     [usuarioAtual],
   );
+
+  /**
+   * Pede permissão de notificação e, se concedida, guarda o token deste
+   * dispositivo em `usuarios/{uid}.fcmTokens` (um array — a mesma conta
+   * pode ativar em mais de um aparelho/navegador). Devolve `false` sem
+   * lançar erro se o usuário negar, o navegador não suportar, ou a VAPID
+   * key não estiver configurada — quem chama decide como comunicar isso.
+   */
+  const ativarNotificacoesPushNoDispositivo = useCallback(async (): Promise<boolean> => {
+    if (!usuarioAtual) throw new Error('Você precisa estar autenticado.');
+    const token = await ativarNotificacoesPush();
+    if (!token) return false;
+    const db = requireDb();
+    await updateDoc(doc(db, 'usuarios', usuarioAtual.id), { fcmTokens: arrayUnion(token) });
+    return true;
+  }, [usuarioAtual]);
 
   /**
    * Militar pede ao escalante/comandante da própria UBM pra passar a
@@ -2412,6 +2442,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       solicitarAcesso,
       enviarResetSenha,
       atualizarMeuPerfil,
+      ativarNotificacoesPushNoDispositivo,
       solicitarRemanejamentoFuncao,
       responderRemanejamento,
       validarMatriculaEfetivo,
@@ -2497,6 +2528,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       solicitarAcesso,
       enviarResetSenha,
       atualizarMeuPerfil,
+      ativarNotificacoesPushNoDispositivo,
       solicitarRemanejamentoFuncao,
       responderRemanejamento,
       validarMatriculaEfetivo,

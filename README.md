@@ -132,6 +132,13 @@ dos dois) e já estão corrigidos:
   `jspdf-autotable` — `src/lib/pdfEscala.ts`) para a escala ordinária e
   extraordinária semanal, no padrão visual institucional (brasão, cabeçalho
   da UBM, tabela por dia).
+- Notificações push (opcional, via Firebase Cloud Messaging —
+  `src/lib/pushNotifications.ts`, `public/firebase-messaging-sw.js`,
+  `/api/send-push` em `server.ts`): o militar ativa em "Meu Perfil", por
+  clique explícito (nunca automático). Some das opções se as variáveis
+  `VITE_FIREBASE_VAPID_KEY`/`FIREBASE_SERVICE_ACCOUNT_JSON` não estiverem
+  configuradas (ver `.env.example`) — alerta interno e e-mail continuam
+  funcionando normalmente de qualquer jeito.
 
 ## Conformidade com a Política Institucional de Desenvolvimento de Sistemas (DTIC/CBMPA)
 

@@ -51,6 +51,8 @@ export interface Usuario {
   militarId?: string;
   /** Vínculo com o Comando (CRB/COP), só quando papeis inclui 'crb' ou 'cop'. */
   comandoId?: string;
+  /** Tokens de dispositivo do Firebase Cloud Messaging (ver pushNotifications.ts) — um por navegador/dispositivo em que o usuário ativou notificações push. */
+  fcmTokens?: string[];
   cargo?: string;
   ativo: boolean;
   criado_em?: string;
