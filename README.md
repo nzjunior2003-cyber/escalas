@@ -133,6 +133,47 @@ dos dois) e já estão corrigidos:
   extraordinária semanal, no padrão visual institucional (brasão, cabeçalho
   da UBM, tabela por dia).
 
+## Conformidade com a Política Institucional de Desenvolvimento de Sistemas (DTIC/CBMPA)
+
+Documentação mínima exigida pelo Capítulo 11 da PIDS/DTIC (v1.0, 2026). O
+GESOP é uma solução desenvolvida fora da DTIC (iniciativa própria de
+unidade), portanto se enquadra no Capítulo 14 (Acolhimento) — ainda não
+comunicado formalmente à DTIC.
+
+- **Finalidade**: gestão da escala de serviço operacional das UBMs do
+  CBMPA (ordinária, extraordinária, diferenciada), reforços de CRB/COP,
+  afastamentos, substituições/permutas e apuração de equidade de serviço.
+- **Unidade gestora / responsável funcional**: a definir junto à unidade
+  demandante (Comando Operacional).
+- **Responsável técnico**: Manuel (desenvolvedor único, fora da DTIC).
+- **Autenticação**: Firebase Authentication (e-mail/senha), com fluxo
+  próprio de solicitação de acesso e aprovação em cadeia. **Não integrado
+  ao Keycloak institucional** — pendência que depende de a DTIC
+  disponibilizar client/realm para o sistema (Cap. 7.1 da PIDS).
+- **Controle de acesso**: baseado em papéis (`master`, `comandante`,
+  `escalante`, `militar`, com sub-papel de reforço CRB/COP), aplicado tanto
+  na UI quanto no servidor (`firestore.rules`) — ver seção "Decisões de
+  modelagem" acima.
+- **Dados tratados**: dados pessoais do efetivo (nome, matrícula, posto,
+  e-mail, UBM) e dados funcionais de escala (serviços, afastamentos,
+  substituições, inclusive motivo de afastamento como atestado médico).
+  Aviso de privacidade e consentimento explícito implementados na tela de
+  solicitação de acesso (`src/components/LoginModal.tsx`).
+- **Base de pessoas**: consumida ao vivo da planilha pública de efetivo do
+  CBMPA (busca em tempo real, sem cópia local versionada) — **não
+  integrado ao SI3** (Cap. 8.1 da PIDS), pendência que depende de a DTIC
+  disponibilizar API/acesso ao SI3.
+- **Auditoria e rastreabilidade**: toda alteração de escala (inclusão,
+  troca, remoção) gera registro de histórico e notificação (alerta +
+  e-mail) ao militar afetado, com autor, data/hora e operação realizada.
+- **Backup**: ainda não configurado — depende de habilitar o plano pago
+  (Blaze) no projeto Firebase para ativar `firestore:backups:schedules`.
+- **Hospedagem**: VPS própria (Docker), fora da infraestrutura da DTIC.
+- **Repositório**: GitHub, conta pessoal — não é o repositório oficial que
+  a DTIC venha a definir.
+- **Exportação de dados**: relatórios em PDF (`jsPDF`), padrão visual
+  institucional (brasão, cabeçalho da UBM).
+
 ## Pendências conhecidas (para alinhar antes de produção)
 
 1. ~~Layout real da planilha de efetivo~~ — resolvido: `src/lib/csvMilitares.ts`
