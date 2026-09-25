@@ -249,7 +249,17 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/vagas_voluntarias_operacao/$(request.resource.data.origemOperacaoVagaId)).data.voluntariosIds.hasAny([perfilDoc().militarId])
           && get(/databases/$(database)/documents/vagas_voluntarias_operacao/$(request.resource.data.origemOperacaoVagaId)).data.ubmId == request.resource.data.ubmId
         );
-      allow update, delete: if podeGerenciarUbm(resource.data.ubmId);
+      // Desistência do próprio voluntariado (ver desistirVoluntariadoOperacao):
+      // o militar só apaga o próprio afastamento, só se ele veio de uma
+      // operação (nunca um afastamento comum, tipo atestado, que continua
+      // exclusivo do escalante/comandante).
+      allow update: if podeGerenciarUbm(resource.data.ubmId);
+      allow delete: if podeGerenciarUbm(resource.data.ubmId)
+        || (
+          ativo()
+          && 'origemOperacaoVagaId' in resource.data
+          && resource.data.militarId == perfilDoc().militarId
+        );
     }
     match /presencas/{documento} {
       allow read: if ativo();
@@ -323,6 +333,19 @@ service cloud.firestore {
           && request.resource.data.voluntariosIds.hasAll(resource.data.voluntariosIds)
           && request.resource.data.voluntariosIds.hasAny([perfilDoc().militarId])
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'voluntariosIds'])
+        )
+        // Desistência (ver desistirVoluntariadoOperacao): o próprio
+        // voluntário se remove, mesmo se a vaga já estava 'preenchida' —
+        // só não depois de resolvida compulsoriamente.
+        || (
+          ativo()
+          && resource.data.status != 'expirada_compulsoria'
+          && resource.data.voluntariosIds.hasAny([perfilDoc().militarId])
+          && request.resource.data.status == 'aberta'
+          && request.resource.data.voluntariosIds.size() == resource.data.voluntariosIds.size() - 1
+          && resource.data.voluntariosIds.hasAll(request.resource.data.voluntariosIds)
+          && !request.resource.data.voluntariosIds.hasAny([perfilDoc().militarId])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'voluntariosIds'])
         );
     }
     // Escala do Comando (ver nota em types.ts): ledger de reforços recebidos
@@ -340,7 +363,16 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/vagas_voluntarias_operacao/$(request.resource.data.origemOperacaoVagaId)).data.voluntariosIds.hasAny([perfilDoc().militarId])
           && get(/databases/$(database)/documents/vagas_voluntarias_operacao/$(request.resource.data.origemOperacaoVagaId)).data.ubmId == request.resource.data.ubmOrigemId
         );
-      allow update, delete: if master();
+      allow update: if master();
+      // Mesma desistência do próprio voluntariado — remove só o próprio
+      // registro na escala do comando (o ledger continua travado pra
+      // qualquer outra alteração, exclusiva do master).
+      allow delete: if master()
+        || (
+          ativo()
+          && 'origemOperacaoVagaId' in resource.data
+          && resource.data.militarId == perfilDoc().militarId
+        );
     }
     match /alertas/{documento} {
       allow read: if ativo() && resource.data.usuarioId == request.auth.uid;

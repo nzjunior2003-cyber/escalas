@@ -228,6 +228,7 @@ interface AppContextData {
   /** Escalante da UBM abre voluntariado pra própria cota (recebida em `SolicitacaoOperacao.cotas`). */
   abrirVoluntariadoOperacaoUbm: (operacaoId: string) => Promise<string>;
   voluntariarParaOperacao: (vagaId: string) => Promise<void>;
+  desistirVoluntariadoOperacao: (vagaId: string) => Promise<void>;
   resolverOperacaoCompulsoriamente: (vagaId: string) => Promise<void>;
 
   marcarAlertaLida: (id: string) => Promise<void>;
@@ -1823,6 +1824,57 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [vagasVoluntariasOperacao, afastamentos, usuarios, comandos, usuarioAtual, notificar, notificarMilitarEscalado],
   );
 
+  /**
+   * Militar desiste de um voluntariado antes da resolução final: reabre a
+   * vaga (volta pra 'aberta', mesmo se já estava 'preenchida') e remove o
+   * próprio afastamento e o próprio registro na escala do comando — só os
+   * dele, os outros voluntários da mesma vaga não são afetados. Não é mais
+   * possível depois que a vaga foi completada compulsoriamente (aí a
+   * decisão já não é mais dele).
+   */
+  const desistirVoluntariadoOperacao = useCallback(
+    async (vagaId: string) => {
+      const db = requireDb();
+      const vaga = vagasVoluntariasOperacao.find((v) => v.id === vagaId);
+      const militarId = usuarioAtual?.militarId;
+      if (!vaga) throw new Error('Vaga não encontrada.');
+      if (!militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
+      if (!vaga.voluntariosIds.includes(militarId)) throw new Error('Você não é voluntário dessa vaga.');
+      if (vaga.status === 'expirada_compulsoria') {
+        throw new Error('Essa vaga já foi resolvida compulsoriamente — não é mais possível desistir por aqui.');
+      }
+
+      await updateDoc(doc(db, 'vagas_voluntarias_operacao', vagaId), {
+        status: 'aberta' as StatusVagaOperacao,
+        voluntariosIds: vaga.voluntariosIds.filter((id) => id !== militarId),
+      });
+
+      const afastamentoProprio = afastamentos.find((a) => a.militarId === militarId && a.origemOperacaoVagaId === vagaId);
+      if (afastamentoProprio) {
+        await deleteDoc(doc(db, 'afastamentos', afastamentoProprio.id));
+      }
+      const escalaComandoPropria = escalasComando.find((e) => e.militarId === militarId && e.origemOperacaoVagaId === vagaId);
+      if (escalaComandoPropria) {
+        await deleteDoc(doc(db, 'escalas_comando', escalaComandoPropria.id));
+      }
+
+      const gestaoDaUbm = usuarios.filter(
+        (u) => u.ubmId === vaga.ubmId && (u.papeis?.includes('escalante') || u.papeis?.includes('comandante')),
+      );
+      await Promise.all(
+        gestaoDaUbm.map((u) =>
+          notificar(
+            u.id,
+            'vaga_operacao_disponivel',
+            `Um voluntário desistiu de "${vaga.motivo}" em ${vaga.data} — a vaga reabriu.`,
+            '/sistema/reforcos',
+          ),
+        ),
+      );
+    },
+    [vagasVoluntariasOperacao, afastamentos, escalasComando, usuarios, usuarioAtual, notificar],
+  );
+
   /** Prazo esgotado com posições sobrando: completa compulsoriamente priorizando quem tem menos reforços/missões recentes (fila de fairness simples, sem exigência de função). */
   const resolverOperacaoCompulsoriamente = useCallback(
     async (vagaId: string) => {
@@ -2304,6 +2356,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       dispararSolicitacaoOperacao,
       abrirVoluntariadoOperacaoUbm,
       voluntariarParaOperacao,
+      desistirVoluntariadoOperacao,
       resolverOperacaoCompulsoriamente,
       marcarAlertaLida,
       deleteAlerta,
@@ -2387,6 +2440,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       dispararSolicitacaoOperacao,
       abrirVoluntariadoOperacaoUbm,
       voluntariarParaOperacao,
+      desistirVoluntariadoOperacao,
       resolverOperacaoCompulsoriamente,
       marcarAlertaLida,
       deleteAlerta,

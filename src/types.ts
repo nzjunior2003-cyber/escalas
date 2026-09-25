@@ -410,6 +410,8 @@ export interface Afastamento {
   dataFim: string;
   /** Preenchido quando o afastamento foi gerado automaticamente ao atender uma SolicitacaoReforco. */
   origemReforcoId?: string;
+  /** Preenchido quando o afastamento veio de um voluntariado (ou resolução compulsória) de VagaVoluntariaOperacao. */
+  origemOperacaoVagaId?: string;
   criadoPorId: string;
   criado_em: string;
 }
@@ -629,7 +631,9 @@ export interface EscalaComando {
   funcaoNome: string;
   data: string; // yyyy-MM-dd
   motivo: string;
-  origemReforcoId: string;
+  /** Um dos dois sempre preenchido: reforço individual (CRB/COP -> 1 militar) ou reforço de operação em massa. */
+  origemReforcoId?: string;
+  origemOperacaoVagaId?: string;
   criado_em: string;
 }
 

@@ -505,17 +505,20 @@ function OperacaoUbm({ ubmId }: { ubmId: string }) {
   );
 }
 
-/** Vagas de reforço de operação abertas pra própria UBM — qualquer militar ativo pode se voluntariar. */
+/** Vagas de reforço de operação abertas pra própria UBM — qualquer militar ativo pode se voluntariar (e desistir enquanto não resolvida compulsoriamente). */
 function VoluntariadoOperacaoMilitar() {
-  const { usuarioAtual, vagasVoluntariasOperacao, voluntariarParaOperacao } = useApp();
+  const { usuarioAtual, vagasVoluntariasOperacao, voluntariarParaOperacao, desistirVoluntariadoOperacao } = useApp();
   const [processando, setProcessando] = useState<string | null>(null);
 
   const meuMilitarId = usuarioAtual?.militarId;
   const vagasElegiveis = vagasVoluntariasOperacao.filter(
     (v) => v.status === 'aberta' && meuMilitarId && v.candidatosElegiveisIds.includes(meuMilitarId) && !v.voluntariosIds.includes(meuMilitarId),
   );
+  const vagasConfirmadas = vagasVoluntariasOperacao.filter(
+    (v) => meuMilitarId && v.voluntariosIds.includes(meuMilitarId) && v.status !== 'expirada_compulsoria',
+  );
 
-  if (vagasElegiveis.length === 0) return null;
+  if (vagasElegiveis.length === 0 && vagasConfirmadas.length === 0) return null;
 
   const handleVoluntariar = async (vagaId: string) => {
     setProcessando(vagaId);
@@ -528,26 +531,61 @@ function VoluntariadoOperacaoMilitar() {
     }
   };
 
+  const handleDesistir = async (vagaId: string) => {
+    if (!confirm('Desistir desse voluntariado? A vaga volta a ficar aberta pra outros militares.')) return;
+    setProcessando(vagaId);
+    try {
+      await desistirVoluntariadoOperacao(vagaId);
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível desistir.');
+    } finally {
+      setProcessando(null);
+    }
+  };
+
   return (
     <div className="space-y-4 pt-4 border-t border-gray-200">
       <h2 className="text-lg font-semibold text-gray-900">Voluntariado para reforço de operação</h2>
-      <div className="space-y-3">
-        {vagasElegiveis.map((v) => (
-          <div key={v.id} className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="text-sm">
-              <p className="font-medium text-gray-900">{v.motivo}</p>
-              <p className="text-gray-500">{v.data} · {v.voluntariosIds.length}/{v.quantidade} preenchido(s) · Prazo: {v.prazo}</p>
+
+      {vagasConfirmadas.length > 0 && (
+        <div className="space-y-3">
+          {vagasConfirmadas.map((v) => (
+            <div key={v.id} className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm">
+                <p className="font-medium text-gray-900">{v.motivo} <span className="font-normal text-emerald-700">— você confirmado</span></p>
+                <p className="text-gray-500">{v.data} · {v.voluntariosIds.length}/{v.quantidade} preenchido(s)</p>
+              </div>
+              <button
+                onClick={() => handleDesistir(v.id)}
+                disabled={processando === v.id}
+                className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+              >
+                {processando === v.id ? 'Enviando...' : 'Desistir'}
+              </button>
             </div>
-            <button
-              onClick={() => handleVoluntariar(v.id)}
-              disabled={processando === v.id}
-              className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-            >
-              {processando === v.id ? 'Enviando...' : 'Quero me voluntariar'}
-            </button>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {vagasElegiveis.length > 0 && (
+        <div className="space-y-3">
+          {vagasElegiveis.map((v) => (
+            <div key={v.id} className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm">
+                <p className="font-medium text-gray-900">{v.motivo}</p>
+                <p className="text-gray-500">{v.data} · {v.voluntariosIds.length}/{v.quantidade} preenchido(s) · Prazo: {v.prazo}</p>
+              </div>
+              <button
+                onClick={() => handleVoluntariar(v.id)}
+                disabled={processando === v.id}
+                className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {processando === v.id ? 'Enviando...' : 'Quero me voluntariar'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
