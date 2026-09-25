@@ -66,7 +66,9 @@ import {
   ModalidadeSolicitacaoServico,
   RegistroPresenca,
   SolicitacaoReforco,
+  SolicitacaoRemanejamento,
   SolicitacaoServico,
+  StatusRemanejamento,
   StatusSolicitacaoReforco,
   StatusSolicitacaoServico,
   StatusVagaVoluntaria,
@@ -91,6 +93,7 @@ interface AppContextData {
   presencas: RegistroPresenca[];
   solicitacoesServico: SolicitacaoServico[];
   solicitacoesReforco: SolicitacaoReforco[];
+  solicitacoesRemanejamento: SolicitacaoRemanejamento[];
   escalasComando: EscalaComando[];
   fechamentosEscala: FechamentoEscala[];
   historicoEscalas: HistoricoEscala[];
@@ -115,6 +118,10 @@ interface AppContextData {
     naoEncontradoNaPlanilha?: boolean;
   }) => Promise<void>;
   enviarResetSenha: (email: string) => Promise<void>;
+  /** Autoedição do próprio perfil — só o nome de guerra da conta (não altera o cadastro de efetivo). */
+  atualizarMeuPerfil: (dados: { nomeGuerra: string }) => Promise<void>;
+  solicitarRemanejamentoFuncao: (dados: { funcaoDesejadaId: string; motivo: string }) => Promise<void>;
+  responderRemanejamento: (id: string, aprovado: boolean) => Promise<void>;
   /** Confere a matrícula contra a planilha ao vivo do efetivo do CBMPA. */
   validarMatriculaEfetivo: (matricula: string) => Promise<LinhaMilitar | null>;
   buscarMilitaresEfetivoPorNome: (nome: string) => Promise<LinhaMilitar[]>;
@@ -345,6 +352,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const afastamentos = useColecao<Afastamento>('afastamentos', isAuthenticated);
   const presencas = useColecao<RegistroPresenca>('presencas', isAuthenticated);
   const solicitacoesServico = useColecao<SolicitacaoServico>('solicitacoes_servico', isAuthenticated);
+  const solicitacoesRemanejamento = useColecao<SolicitacaoRemanejamento>('solicitacoes_remanejamento', isAuthenticated);
   const solicitacoesReforco = useColecao<SolicitacaoReforco>('solicitacoes_reforco', isAuthenticated);
   const escalasComando = useColecao<EscalaComando>('escalas_comando', isAuthenticated);
   const fechamentosEscala = useColecao<FechamentoEscala>('fechamentos_escala', isAuthenticated);
@@ -697,6 +705,108 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       throw new Error(mensagemErroAuth(erro));
     }
   }, []);
+
+  /** Autoedição do próprio perfil (conta de acesso) — só o nome de guerra, não mexe no cadastro de efetivo. */
+  const atualizarMeuPerfil = useCallback(
+    async (dados: { nomeGuerra: string }) => {
+      const db = requireDb();
+      if (!usuarioAtual) throw new Error('Você precisa estar autenticado.');
+      await updateDoc(doc(db, 'usuarios', usuarioAtual.id), { nomeGuerra: dados.nomeGuerra });
+    },
+    [usuarioAtual],
+  );
+
+  /**
+   * Militar pede ao escalante/comandante da própria UBM pra passar a
+   * exercer (ou deixar de exercer) uma função — não se aplica sozinho, fica
+   * `pendente` até ser respondido.
+   */
+  const solicitarRemanejamentoFuncao = useCallback(
+    async (dados: { funcaoDesejadaId: string; motivo: string }) => {
+      const db = requireDb();
+      if (!usuarioAtual?.militarId) throw new Error('Seu usuário não está vinculado a um militar do efetivo.');
+      const ubmId = usuarioAtual.ubmId;
+      await addDoc(collection(db, 'solicitacoes_remanejamento'), {
+        ubmId,
+        militarId: usuarioAtual.militarId,
+        solicitanteId: usuarioAtual.id,
+        funcaoDesejadaId: dados.funcaoDesejadaId,
+        motivo: dados.motivo,
+        status: 'pendente' as StatusRemanejamento,
+        criado_em: new Date().toISOString(),
+      });
+
+      const funcaoNome = funcoes.find((f) => f.id === dados.funcaoDesejadaId)?.nome ?? 'função removida';
+      const aprovadores = usuarios.filter(
+        (u) => u.ubmId === ubmId && (u.papeis.includes('comandante') || u.papeis.includes('escalante')),
+      );
+      await Promise.all(
+        aprovadores.map((a) =>
+          notificar(
+            a.id,
+            'remanejamento_solicitado',
+            `${usuarioAtual.nomeGuerra || usuarioAtual.nome} solicitou remanejamento para a função de ${funcaoNome}.`,
+            '/sistema/solicitacoes',
+          ),
+        ),
+      );
+    },
+    [usuarioAtual, funcoes, usuarios, notificar],
+  );
+
+  /**
+   * Escalante/comandante decide o pedido. Ao aprovar, acrescenta a função
+   * desejada ao cadastro do militar (acúmulo — não remove as demais); a
+   * decisão de tirar alguma função existente continua manual, em Efetivo.
+   */
+  const responderRemanejamento = useCallback(
+    async (id: string, aprovado: boolean) => {
+      const db = requireDb();
+      const solicitacao = solicitacoesRemanejamento.find((s) => s.id === id);
+      if (!solicitacao) throw new Error('Solicitação não encontrada.');
+
+      await updateDoc(doc(db, 'solicitacoes_remanejamento', id), {
+        status: (aprovado ? 'aprovado' : 'rejeitado') as StatusRemanejamento,
+        respondidoPorId: usuarioAtual?.id ?? '',
+        respondido_em: new Date().toISOString(),
+      });
+
+      if (aprovado) {
+        const militar = militares.find((m) => m.id === solicitacao.militarId);
+        if (militar && !militar.funcoes.includes(solicitacao.funcaoDesejadaId)) {
+          await updateDoc(doc(db, 'militares', militar.id), {
+            funcoes: [...militar.funcoes, solicitacao.funcaoDesejadaId],
+            atualizado_em: new Date().toISOString(),
+          });
+        }
+      }
+
+      const funcaoNome = funcoes.find((f) => f.id === solicitacao.funcaoDesejadaId)?.nome ?? 'função removida';
+      const destinatario = usuarios.find((u) => u.id === solicitacao.solicitanteId);
+      if (destinatario) {
+        await notificar(
+          destinatario.id,
+          'remanejamento_respondido',
+          aprovado
+            ? `Seu pedido de remanejamento para ${funcaoNome} foi aprovado.`
+            : `Seu pedido de remanejamento para ${funcaoNome} foi rejeitado.`,
+          '/sistema/solicitacoes',
+        );
+        if (aprovado) {
+          try {
+            await enviarEmail({
+              to: destinatario.email,
+              subject: 'Remanejamento aprovado — GESOP',
+              html: `<p>Seu pedido de remanejamento para a função de <b>${funcaoNome}</b> foi aprovado.</p>`,
+            });
+          } catch (erro) {
+            console.error('Erro ao enviar e-mail de remanejamento aprovado:', erro);
+          }
+        }
+      }
+    },
+    [solicitacoesRemanejamento, militares, funcoes, usuarios, usuarioAtual, notificar],
+  );
 
   // --- UBMs -------------------------------------------------------------
   const addUbm = useCallback(async (dados: Omit<Ubm, 'id'>) => {
@@ -1842,6 +1952,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       presencas,
       solicitacoesServico,
       solicitacoesReforco,
+      solicitacoesRemanejamento,
       escalasComando,
       fechamentosEscala,
       historicoEscalas,
@@ -1854,6 +1965,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       logout,
       solicitarAcesso,
       enviarResetSenha,
+      atualizarMeuPerfil,
+      solicitarRemanejamentoFuncao,
+      responderRemanejamento,
       validarMatriculaEfetivo,
       buscarMilitaresEfetivoPorNome,
       primeiroAcessoPorMatricula,
@@ -1916,6 +2030,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       presencas,
       solicitacoesServico,
       solicitacoesReforco,
+      solicitacoesRemanejamento,
       escalasComando,
       fechamentosEscala,
       historicoEscalas,
@@ -1927,6 +2042,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       logout,
       solicitarAcesso,
       enviarResetSenha,
+      atualizarMeuPerfil,
+      solicitarRemanejamentoFuncao,
+      responderRemanejamento,
       validarMatriculaEfetivo,
       buscarMilitaresEfetivoPorNome,
       primeiroAcessoPorMatricula,

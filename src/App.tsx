@@ -19,6 +19,7 @@ import Comandos from './pages/Comandos';
 import Reforcos from './pages/Reforcos';
 import PainelRegional from './pages/PainelRegional';
 import Alertas from './pages/Alertas';
+import MeuPerfil from './pages/MeuPerfil';
 
 export default function App() {
   return (
@@ -45,6 +46,7 @@ export default function App() {
                 <Route path="reforcos" element={<Reforcos />} />
                 <Route path="painel-regional" element={<PainelRegional />} />
                 <Route path="alertas" element={<Alertas />} />
+                <Route path="meu-perfil" element={<MeuPerfil />} />
               </Route>
             </Route>
           </Routes>

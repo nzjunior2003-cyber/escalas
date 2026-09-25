@@ -18,6 +18,8 @@ export default defineConfig(() => {
         workbox: {
           cleanupOutdatedCaches: true,
           globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+          // Padrão do Workbox é 2 MiB; o bundle principal já passou disso.
+          maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         },
         manifest: {
           name: 'GESOP — CBMPA',

@@ -164,6 +164,33 @@ export interface Militar {
 }
 
 // ---------------------------------------------------------------------------
+// Remanejamento/alteração de função — o próprio militar solicita ao
+// escalante da UBM (não se aplica sozinho: exige aprovação).
+// ---------------------------------------------------------------------------
+export type StatusRemanejamento = 'pendente' | 'aprovado' | 'rejeitado';
+
+export const STATUS_REMANEJAMENTO_LABELS: Record<StatusRemanejamento, string> = {
+  pendente: 'Aguardando análise',
+  aprovado: 'Aprovado',
+  rejeitado: 'Rejeitado',
+};
+
+export interface SolicitacaoRemanejamento {
+  id: string;
+  ubmId: string;
+  militarId: string;
+  /** Id de `Usuario` de quem fez o pedido (sempre o próprio militar). */
+  solicitanteId: string;
+  /** Id de `FuncaoUbm` desejada — pode ser uma função nova (acúmulo) ou pedido de deixar de exercer uma das atuais. */
+  funcaoDesejadaId: string;
+  motivo: string;
+  status: StatusRemanejamento;
+  criado_em: string;
+  respondidoPorId?: string;
+  respondido_em?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Escala ordinária
 // ---------------------------------------------------------------------------
 export interface EscalaOrdinaria {
@@ -563,6 +590,8 @@ export type TipoAlerta =
   | 'militar_nao_encontrado_na_planilha'
   | 'escalado'
   | 'removido_da_escala'
+  | 'remanejamento_solicitado'
+  | 'remanejamento_respondido'
   | 'geral';
 
 export interface Alerta {

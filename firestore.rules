@@ -256,6 +256,19 @@ service cloud.firestore {
         podeGerenciarUbm(resource.data.ubmId)
       );
     }
+    // Remanejamento/alteração de função: só o próprio militar cria, pra si
+    // mesmo e pra própria UBM; só quem gerencia a UBM responde (aprova/
+    // rejeita) — a aplicação de fato (acréscimo da função no cadastro) é
+    // feita pelo servidor/app, não pelo cliente que responde.
+    match /solicitacoes_remanejamento/{documento} {
+      allow read: if ativo();
+      allow create: if ativo()
+        && request.resource.data.solicitanteId == request.auth.uid
+        && request.resource.data.militarId == perfilDoc().militarId
+        && request.resource.data.ubmId == perfilDoc().ubmId
+        && request.resource.data.status == 'pendente';
+      allow update: if podeGerenciarUbm(resource.data.ubmId);
+    }
     // Solicitação de Reforço (CRB/COP -> UBM, ver nota em types.ts): só
     // quem tem o papel 'crb'/'cop' no comando de origem cria, e só pra uma
     // UBM de fato vinculada àquele comando; só quem gerencia a UBM alvo

@@ -22,9 +22,11 @@ export default function Solicitacoes() {
     escalasOrdinarias,
     escalasExtraordinarias,
     solicitacoesServico,
+    solicitacoesRemanejamento,
     criarSolicitacaoServico,
     responderSolicitacaoIndicado,
     responderSolicitacaoAprovador,
+    responderRemanejamento,
   } = useApp();
 
   const ubmId = usuarioAtual?.ubmId ?? '';
@@ -75,6 +77,9 @@ export default function Solicitacoes() {
   const solicitacoesParaMim = solicitacoesServico.filter((s) => s.indicadoId === usuarioAtual?.id && s.status === 'aguardando_indicado');
   const solicitacoesParaAprovador = isAprovador
     ? solicitacoesServico.filter((s) => s.ubmId === ubmId && s.status === 'aguardando_aprovacao')
+    : [];
+  const solicitacoesRemanejamentoPendentes = isAprovador
+    ? solicitacoesRemanejamento.filter((s) => s.ubmId === ubmId && s.status === 'pendente')
     : [];
 
   const nomeUsuario = (id: string) => usuarios.find((u) => u.id === id)?.nome ?? '—';
@@ -234,6 +239,28 @@ export default function Solicitacoes() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {solicitacoesRemanejamentoPendentes.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-amber-900">Pedidos de remanejamento de função</h3>
+          {solicitacoesRemanejamentoPendentes.map((s) => {
+            const militar = militares.find((m) => m.id === s.militarId);
+            const funcaoNome = funcoes.find((f) => f.id === s.funcaoDesejadaId)?.nome ?? 'Função removida';
+            return (
+              <div key={s.id} className="flex items-center justify-between bg-white rounded-md p-3 border border-amber-100">
+                <div className="text-sm">
+                  <p className="font-medium text-gray-900">{militar ? `${militar.posto} ${militar.nome}` : 'Militar removido'} → {funcaoNome}</p>
+                  <p className="text-gray-500">Motivo: {s.motivo}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => responderRemanejamento(s.id, true)} className="px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Aprovar</button>
+                  <button onClick={() => responderRemanejamento(s.id, false)} className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300">Recusar</button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
