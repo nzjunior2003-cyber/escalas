@@ -2,9 +2,11 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarDays, Plus, Sparkles, Lock, Megaphone, HandHeart, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
+import { CalendarDays, Download, Plus, Sparkles, Lock, Megaphone, HandHeart, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, ordenarCandidatosExtraordinario, previsaoLiberada, semanaInicioDe } from '../../lib/escala';
+import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, nomeUbmPorExtenso, ordenarCandidatosExtraordinario, previsaoLiberada, semanaInicioDe } from '../../lib/escala';
+import { gerarPdfEscala } from '../../lib/pdfEscala';
+import { abreviarPosto } from '../../lib/posto';
 import { STATUS_VAGA_VOLUNTARIA_LABELS, temPapel } from '../../types';
 import type { EscalaOrdinaria, FuncaoUbm, Militar } from '../../types';
 
@@ -31,6 +33,7 @@ export default function Escala() {
   const {
     usuarioAtual,
     ubms,
+    comandos,
     militares,
     funcoes,
     escalasOrdinarias,
@@ -41,17 +44,20 @@ export default function Escala() {
     adicionarEscalaOrdinaria,
     deleteEscalaOrdinaria,
     moverOrdemFuncao,
+    regerarPrevisaoFuncao,
   } = useApp();
   const [aba, setAba] = useState<Aba>('ordinaria');
   const [granularidade, setGranularidade] = useState<Granularidade>('semanal');
   const [funcaoSelecionada, setFuncaoSelecionada] = useState<string>('');
   const [gerando, setGerando] = useState(false);
   const [gerandoFuncaoId, setGerandoFuncaoId] = useState<string | null>(null);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
   const [arrastando, setArrastando] = useState<{ id: string; funcao: string; data: string; militarId: string } | null>(null);
 
+  const [dataBase, setDataBase] = useState(() => new Date());
   const ubmId = usuarioAtual?.ubmId ?? '';
   const isEscalante = temPapel(usuarioAtual, 'escalante');
-  const { inicio, fim, dias } = useMemo(() => intervaloPorGranularidade(granularidade, new Date()), [granularidade]);
+  const { inicio, fim, dias } = useMemo(() => intervaloPorGranularidade(granularidade, dataBase), [granularidade, dataBase]);
 
   const funcoesDaUbm = funcoes
     .filter((f) => f.ubmId === ubmId && f.ativa)
@@ -122,6 +128,46 @@ export default function Escala() {
     (e) => e.ubmId === ubmId && dias.includes(e.data) && funcoesDaUbm.some((f) => f.id === e.funcao),
   );
 
+  const ubmAtualPdf = ubms.find((u) => u.id === ubmId);
+  const crbAtual = comandos.find((c) => c.tipo === 'crb' && c.ubmIds.includes(ubmId));
+  const meuMilitarPdf = militares.find((m) => m.id === usuarioAtual?.militarId);
+  const semanaFechada = dias.length > 0 && estaTravada(dias[0]);
+
+  const handleBaixarPdf = async () => {
+    setGerandoPdf(true);
+    try {
+      const linhas = escalasDaSemana.map((e) => ({
+        funcaoId: e.funcao,
+        data: e.data,
+        militarNome: (() => {
+          const militar = militares.find((m) => m.id === e.militarId);
+          return militar ? `${militar.posto} ${militar.nome}`.trim() : 'Militar removido';
+        })(),
+      }));
+      await gerarPdfEscala({
+        tipo: 'ordinaria',
+        ubmNome: nomeUbmPorExtenso(ubmAtualPdf),
+        ubmLogoDataUrl: ubmAtualPdf?.logoDataUrl,
+        ubmEndereco: ubmAtualPdf?.endereco,
+        ubmCep: ubmAtualPdf?.cep,
+        ubmBairro: ubmAtualPdf?.bairro,
+        ubmCidade: ubmAtualPdf?.cidade,
+        ubmEmail: ubmAtualPdf?.email,
+        ubmTelefone: ubmAtualPdf?.telefone,
+        crbNome: crbAtual ? `${crbAtual.nome} - ${crbAtual.sigla}` : undefined,
+        semanaInicio: dias[0],
+        funcoes: funcoesDaUbm.map((f) => ({ id: f.id, nome: f.nome })),
+        linhas,
+        escalanteNome: usuarioAtual?.nomeGuerra || usuarioAtual?.nome || '',
+        escalanteCargo: usuarioAtual?.cargo || meuMilitarPdf?.posto,
+      });
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível gerar o PDF.');
+    } finally {
+      setGerandoPdf(false);
+    }
+  };
+
   const handleSoltar = async (funcaoId: string, dia: string, entradasDestino: EscalaOrdinaria[]) => {
     const origem = arrastando;
     setArrastando(null);
@@ -134,8 +180,32 @@ export default function Escala() {
     }
     try {
       await moverDataEscalaOrdinaria(origem.id, dia);
+      confirmarRegerarPrevisao(funcaoId, dia);
     } catch (erro) {
       alert(erro instanceof Error ? erro.message : 'Não foi possível mover essa escala.');
+    }
+  };
+
+  /**
+   * Depois de qualquer edição manual (troca/adição/remoção/arraste) numa
+   * semana ainda aberta, pergunta se o escalante quer recalcular a prévia
+   * daquela função dali pra frente — pedido explícito do usuário, pra não
+   * deixar o rodízio automático desalinhado depois de uma intervenção
+   * manual. Silencioso (nem pergunta) se não havia nenhuma previsão
+   * automática futura pra essa função.
+   */
+  const confirmarRegerarPrevisao = async (funcaoId: string, apartirDe: string) => {
+    const nomeFuncao = funcoes.find((f) => f.id === funcaoId)?.nome ?? 'função';
+    if (!confirm(`Você alterou a escala de "${nomeFuncao}". Quer gerar uma nova prévia pra essa função a partir de ${apartirDe.split('-').reverse().join('/')}, recalculando os dias futuros ainda não fechados?`)) {
+      return;
+    }
+    try {
+      const total = await regerarPrevisaoFuncao({ ubmId, funcao: funcaoId, apartirDe });
+      if (total === 0) {
+        alert('Não havia previsão futura gerada automaticamente pra essa função — nada a recalcular.');
+      }
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível recalcular a previsão.');
     }
   };
 
@@ -169,6 +239,32 @@ export default function Escala() {
                 ))}
               </select>
             )}
+            {granularidade === 'semanal' && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setDataBase((d) => addDays(d, -7))}
+                  title="Semana anterior"
+                  className="p-2 rounded-md text-gray-500 hover:text-red-700 hover:bg-gray-100"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setDataBase(new Date())}
+                  title="Voltar pra semana atual"
+                  className="px-2 py-1 text-xs font-medium text-gray-500 hover:text-red-700 whitespace-nowrap"
+                >
+                  {dias.length > 0 &&
+                    `${format(new Date(dias[0] + 'T00:00:00'), 'dd/MM')} – ${format(new Date(dias[6] + 'T00:00:00'), 'dd/MM')}`}
+                </button>
+                <button
+                  onClick={() => setDataBase((d) => addDays(d, 7))}
+                  title="Próxima semana"
+                  className="p-2 rounded-md text-gray-500 hover:text-red-700 hover:bg-gray-100"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             <div className="flex gap-1">
               {(['semanal', 'mensal', 'anual'] as Granularidade[]).map((g) => (
                 <button
@@ -188,6 +284,16 @@ export default function Escala() {
                 className="ml-auto inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50"
               >
                 <Sparkles className="-ml-1 mr-2 h-4 w-4" /> {gerando ? 'Gerando...' : 'Gerar previsão'}
+              </button>
+            )}
+            {granularidade === 'semanal' && (
+              <button
+                onClick={handleBaixarPdf}
+                disabled={gerandoPdf || funcoesDaUbm.length === 0 || !semanaFechada}
+                title={!semanaFechada ? 'Feche a escala da semana (em Histórico) pra liberar o PDF' : undefined}
+                className="ml-auto inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50"
+              >
+                <Download className="-ml-1 mr-2 h-4 w-4" /> {gerandoPdf ? 'Gerando...' : 'PDF da semana'}
               </button>
             )}
           </div>
@@ -212,7 +318,7 @@ export default function Escala() {
 
           {granularidade === 'semanal' ? (
             <div className="overflow-x-auto">
-              <div className="min-w-[880px] grid gap-2" style={{ gridTemplateColumns: '180px repeat(7, minmax(110px, 1fr))' }}>
+              <div className="min-w-[760px] grid gap-2" style={{ gridTemplateColumns: '110px repeat(7, minmax(90px, 1fr))' }}>
                 <div />
                 {dias.map((dia) => (
                   <div key={dia} className="text-xs font-semibold text-gray-500 uppercase text-center py-2 flex items-center justify-center gap-1">
@@ -242,6 +348,7 @@ export default function Escala() {
                     podeSubir={indice > 0}
                     podeDescer={indice < funcoesDaUbm.length - 1}
                     onMover={(direcao) => moverOrdemFuncao(ubmId, f.id, direcao)}
+                    onAposEditar={(data) => confirmarRegerarPrevisao(f.id, data)}
                   />
                 ))}
               </div>
@@ -296,7 +403,8 @@ export default function Escala() {
 function nomeCurto(militar?: Militar): string {
   if (!militar) return 'Militar removido';
   const nome = militar.nomeGuerra || militar.nome;
-  return militar.posto ? `${militar.posto} ${nome}` : nome;
+  const posto = abreviarPosto(militar.posto);
+  return posto ? `${posto} ${nome}` : nome;
 }
 
 function FuncaoLinha({
@@ -318,6 +426,7 @@ function FuncaoLinha({
   podeSubir,
   podeDescer,
   onMover,
+  onAposEditar,
 }: {
   funcao: FuncaoUbm;
   dias: string[];
@@ -337,6 +446,7 @@ function FuncaoLinha({
   podeSubir: boolean;
   podeDescer: boolean;
   onMover: (direcao: 'cima' | 'baixo') => void;
+  onAposEditar: (data: string) => void;
 }) {
   const escalasDaFuncao = escalasDaSemana.filter((e) => e.funcao === funcao.id);
   const [adicionandoEm, setAdicionandoEm] = useState<string | null>(null);
@@ -419,7 +529,10 @@ function FuncaoLinha({
                       defaultValue={entrada.militarId}
                       onChange={(ev) => {
                         setTrocandoId(null);
-                        if (ev.target.value !== entrada.militarId) updateEscalaOrdinaria(entrada.id, ev.target.value);
+                        if (ev.target.value !== entrada.militarId) {
+                          updateEscalaOrdinaria(entrada.id, ev.target.value);
+                          onAposEditar(entrada.data);
+                        }
                       }}
                       onBlur={() => setTrocandoId(null)}
                     >
@@ -441,7 +554,10 @@ function FuncaoLinha({
                       )}
                       {isEscalante && !travada && entrada.origem !== 'diferenciada' && (
                         <button
-                          onClick={() => onRemover(entrada.id)}
+                          onClick={() => {
+                            onRemover(entrada.id);
+                            onAposEditar(entrada.data);
+                          }}
                           title="Remover"
                           className="shrink-0 text-red-300 hover:text-red-700 p-0.5 -m-0.5"
                         >
@@ -466,7 +582,10 @@ function FuncaoLinha({
                   onChange={(ev) => {
                     const militarId = ev.target.value;
                     setAdicionandoEm(null);
-                    if (militarId) onAdicionar(militarId, dia);
+                    if (militarId) {
+                      onAdicionar(militarId, dia);
+                      onAposEditar(dia);
+                    }
                   }}
                   onBlur={() => setAdicionandoEm(null)}
                 >

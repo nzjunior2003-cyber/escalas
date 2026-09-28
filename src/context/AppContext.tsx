@@ -49,6 +49,7 @@ import {
   extraordinariasNoMes,
   gerarEscalaOrdinariaUbm,
   ordenarCandidatosExtraordinario,
+  semanaInicioDe,
   sugerirMilitarExtraordinario,
   temFolga24hAntes,
 } from '../lib/escala';
@@ -172,6 +173,8 @@ interface AppContextData {
   updateFuncao: (id: string, dados: Partial<Pick<FuncaoUbm, 'nome' | 'ativa'>>) => Promise<void>;
   deleteFuncao: (id: string) => Promise<void>;
   moverOrdemFuncao: (ubmId: string, funcaoId: string, direcao: 'cima' | 'baixo') => Promise<void>;
+  /** Recalcula a prévia (só o que era 'gerada', nunca 'manual'/'diferenciada') de uma função a partir de uma data. Devolve quantos dias foram regerados (0 = nada a recalcular). */
+  regerarPrevisaoFuncao: (dados: { ubmId: string; funcao: string; apartirDe: string }) => Promise<number>;
 
   gerarEPersistirEscalaOrdinaria: (params: { ubmId: string; dataInicio: string; dataFim: string }) => Promise<number>;
   updateEscalaOrdinaria: (id: string, militarId: string) => Promise<void>;
@@ -1230,6 +1233,46 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       );
     },
     [funcoes, notificarMilitarEscalado],
+  );
+
+  /**
+   * Recalcula a prévia de uma função a partir de uma data: apaga as
+   * escalas ainda 'gerada' (nunca 'manual' nem 'diferenciada' — só o que o
+   * próprio sistema tinha previsto sozinho) daquela função dali pra frente,
+   * até o horizonte que já existia, e gera de novo — a contagem de equidade
+   * já enxerga a mudança manual que disparou o recálculo (ela está em
+   * `escalasOrdinarias` antes desta chamada), então a redistribuição
+   * reflete o novo estado. Nunca mexe em semana já fechada. Devolve `0` sem
+   * fazer nada se não havia nenhuma previsão futura pra essa função.
+   */
+  const regerarPrevisaoFuncao = useCallback(
+    async (dados: { ubmId: string; funcao: string; apartirDe: string }) => {
+      const db = requireDb();
+      const semanasTravadas = new Set(
+        fechamentosEscala.filter((f) => f.ubmId === dados.ubmId && f.tipo === 'ordinaria' && f.travada).map((f) => f.semanaInicio),
+      );
+      const regeneraveis = escalasOrdinarias.filter(
+        (e) =>
+          e.ubmId === dados.ubmId &&
+          e.funcao === dados.funcao &&
+          e.origem === 'gerada' &&
+          e.data >= dados.apartirDe &&
+          !semanasTravadas.has(semanaInicioDe(e.data)),
+      );
+      if (regeneraveis.length === 0) return 0;
+
+      const horizonte = regeneraveis.reduce((max, e) => (e.data > max ? e.data : max), regeneraveis[0].data);
+
+      for (let inicio = 0; inicio < regeneraveis.length; inicio += 400) {
+        const lote = writeBatch(db);
+        regeneraveis.slice(inicio, inicio + 400).forEach((e) => lote.delete(doc(db, 'escalas_ordinarias', e.id)));
+        await lote.commit();
+      }
+
+      await gerarEPersistirEscalaOrdinaria({ ubmId: dados.ubmId, dataInicio: dados.apartirDe, dataFim: horizonte });
+      return regeneraveis.length;
+    },
+    [escalasOrdinarias, fechamentosEscala, gerarEPersistirEscalaOrdinaria],
   );
 
   // --- Escala extraordinária ---------------------------------------------
@@ -2466,6 +2509,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       updateFuncao,
       deleteFuncao,
       moverOrdemFuncao,
+      regerarPrevisaoFuncao,
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
       moverDataEscalaOrdinaria,
@@ -2552,6 +2596,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       updateFuncao,
       deleteFuncao,
       moverOrdemFuncao,
+      regerarPrevisaoFuncao,
       gerarEPersistirEscalaOrdinaria,
       updateEscalaOrdinaria,
       moverDataEscalaOrdinaria,

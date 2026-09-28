@@ -2,18 +2,9 @@ import { useState } from 'react';
 import { startOfWeek, addDays } from 'date-fns';
 import { Download, Lock, Unlock } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { formatarDataISO } from '../../lib/escala';
+import { formatarDataISO, nomeUbmPorExtenso } from '../../lib/escala';
 import { gerarPdfEscala } from '../../lib/pdfEscala';
-import { temPapel, type HistoricoEscala, type TipoEscalaServico, type Ubm } from '../../types';
-
-/** Número ordinal (ex.: "30º") + nome por extenso da UBM, sem duplicar o ordinal quando o campo `nome` já o inclui. */
-function nomeUbmPorExtenso(ubm: Ubm | undefined): string {
-  if (!ubm) return 'Unidade de Bombeiro Militar';
-  const ordinal = ubm.sigla.match(/^\d+º/)?.[0];
-  const nome = ubm.nome.trim();
-  if (!ordinal || nome.startsWith(ordinal)) return nome;
-  return `${ordinal} ${nome}`;
-}
+import { temPapel, type HistoricoEscala, type TipoEscalaServico } from '../../types';
 
 export default function Historico() {
   const {

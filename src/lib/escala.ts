@@ -55,12 +55,22 @@ import {
   type EscalaOrdinaria,
   type FuncaoUbm,
   type Militar,
+  type Ubm,
 } from '../types';
 
 export const FORMATO_DATA = 'yyyy-MM-dd';
 
 export function formatarDataISO(data: Date): string {
   return format(data, FORMATO_DATA);
+}
+
+/** Número ordinal (ex.: "30º") + nome por extenso da UBM, sem duplicar o ordinal quando o campo `nome` já o inclui. */
+export function nomeUbmPorExtenso(ubm: Ubm | undefined): string {
+  if (!ubm) return 'Unidade de Bombeiro Militar';
+  const ordinal = ubm.sigla.match(/^\d+º/)?.[0];
+  const nome = ubm.nome.trim();
+  if (!ordinal || nome.startsWith(ordinal)) return nome;
+  return `${ordinal} ${nome}`;
 }
 
 /** Segunda-feira (yyyy-MM-dd) da semana à qual `data` (yyyy-MM-dd) pertence — usado pra achar o fechamento da semana. */
