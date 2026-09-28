@@ -74,4 +74,26 @@ export function statusPermissaoPush(): NotificationPermission | 'indisponivel' {
   return Notification.permission;
 }
 
+/** iPhone/iPad (qualquer navegador — todos usam o motor do Safari por exigência da Apple). iPadOS 13+ se disfarça de "Macintosh", daí o teste extra por multitoque. */
+function estaNoIOS(): boolean {
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  return /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+}
+
+/** O app já foi aberto a partir do ícone instalado na tela de início (modo standalone), não como aba comum do navegador. */
+function estaInstaladoComoPwa(): boolean {
+  return window.matchMedia('(display-mode: standalone)').matches || (window.navigator as { standalone?: boolean }).standalone === true;
+}
+
+/**
+ * No iPhone/iPad, a Apple só entrega push pra quem instalou o app na tela
+ * de início (e mesmo assim, só a partir do iOS 16.4) — uma aba comum do
+ * Safari nunca recebe, não importa a versão. Use isso pra avisar o usuário
+ * ANTES de ele clicar em ativar e receber uma falha sem explicação.
+ */
+export function precisaInstalarNoIOS(): boolean {
+  return estaNoIOS() && !estaInstaladoComoPwa();
+}
+
 export const pushConfigurado = Boolean(VAPID_KEY);

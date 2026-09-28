@@ -4,7 +4,7 @@ import { User, Mail, IdCard, Building2, Lock, Send, Bell } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import FormField from '../../components/ui/FormField';
 import { PAPEL_LABELS, STATUS_REMANEJAMENTO_LABELS } from '../../types';
-import { pushConfigurado, statusPermissaoPush } from '../../lib/pushNotifications';
+import { precisaInstalarNoIOS, pushConfigurado, statusPermissaoPush } from '../../lib/pushNotifications';
 
 /** Autoedição do próprio perfil (nome de guerra + troca de senha), notificações push e solicitação de remanejamento/alteração de função ao escalante. */
 export default function MeuPerfil() {
@@ -182,6 +182,13 @@ export default function MeuPerfil() {
             </p>
           ) : statusPush === 'indisponivel' ? (
             <p className="text-sm text-gray-400">Este navegador não suporta notificações push.</p>
+          ) : precisaInstalarNoIOS() ? (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              No iPhone/iPad, a Apple só entrega notificação pra quem instalou o app: toque em{' '}
+              <span className="font-medium">Compartilhar</span> na barra do Safari e depois em{' '}
+              <span className="font-medium">"Adicionar à Tela de Início"</span>. Depois de instalado, abra o GESOP
+              pelo ícone da tela de início (não pelo Safari) e volte aqui.
+            </p>
           ) : (
             <button onClick={handleAtivarPush} disabled={ativandoPush} className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50">
               {ativandoPush ? 'Ativando...' : 'Ativar notificações push neste dispositivo'}
