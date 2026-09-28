@@ -45,6 +45,8 @@ export default function Escala() {
     deleteEscalaOrdinaria,
     moverOrdemFuncao,
     regerarPrevisaoFuncao,
+    fecharEscalaSemana,
+    reabrirEscalaSemana,
   } = useApp();
   const [aba, setAba] = useState<Aba>('ordinaria');
   const [granularidade, setGranularidade] = useState<Granularidade>('semanal');
@@ -52,6 +54,7 @@ export default function Escala() {
   const [gerando, setGerando] = useState(false);
   const [gerandoFuncaoId, setGerandoFuncaoId] = useState<string | null>(null);
   const [gerandoPdf, setGerandoPdf] = useState(false);
+  const [fechandoSemana, setFechandoSemana] = useState(false);
   const [arrastando, setArrastando] = useState<{ id: string; funcao: string; data: string; militarId: string } | null>(null);
 
   const [dataBase, setDataBase] = useState(() => new Date());
@@ -165,6 +168,34 @@ export default function Escala() {
       alert(erro instanceof Error ? erro.message : 'Não foi possível gerar o PDF.');
     } finally {
       setGerandoPdf(false);
+    }
+  };
+
+  const handleFecharSemana = async () => {
+    if (!confirm('Fechar a escala desta semana? Depois de fechada, ela fica travada pra edição e libera o PDF oficial — só dá pra voltar a editar reabrindo antes.')) {
+      return;
+    }
+    setFechandoSemana(true);
+    try {
+      await fecharEscalaSemana({ ubmId, tipo: 'ordinaria', semanaInicio: dias[0] });
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível fechar a escala da semana.');
+    } finally {
+      setFechandoSemana(false);
+    }
+  };
+
+  const handleReabrirSemana = async () => {
+    if (!confirm('Reabrir a escala desta semana pra edição? O PDF gerado anteriormente continua no Histórico, mas o botão de PDF aqui fica bloqueado de novo até fechar novamente.')) {
+      return;
+    }
+    setFechandoSemana(true);
+    try {
+      await reabrirEscalaSemana({ ubmId, tipo: 'ordinaria', semanaInicio: dias[0] });
+    } catch (erro) {
+      alert(erro instanceof Error ? erro.message : 'Não foi possível reabrir a escala da semana.');
+    } finally {
+      setFechandoSemana(false);
     }
   };
 
@@ -287,14 +318,35 @@ export default function Escala() {
               </button>
             )}
             {granularidade === 'semanal' && (
-              <button
-                onClick={handleBaixarPdf}
-                disabled={gerandoPdf || funcoesDaUbm.length === 0 || !semanaFechada}
-                title={!semanaFechada ? 'Feche a escala da semana (em Histórico) pra liberar o PDF' : undefined}
-                className="ml-auto inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50"
-              >
-                <Download className="-ml-1 mr-2 h-4 w-4" /> {gerandoPdf ? 'Gerando...' : 'PDF da semana'}
-              </button>
+              <div className="ml-auto flex items-center gap-2">
+                {isEscalante && (
+                  semanaFechada ? (
+                    <button
+                      onClick={handleReabrirSemana}
+                      disabled={fechandoSemana}
+                      className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {fechandoSemana ? 'Reabrindo...' : 'Reabrir pra editar'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleFecharSemana}
+                      disabled={fechandoSemana}
+                      className="inline-flex items-center px-3 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-700 hover:bg-red-800 disabled:opacity-50"
+                    >
+                      {fechandoSemana ? 'Fechando...' : 'Fechar escala'}
+                    </button>
+                  )
+                )}
+                <button
+                  onClick={handleBaixarPdf}
+                  disabled={gerandoPdf || funcoesDaUbm.length === 0 || !semanaFechada}
+                  title={!semanaFechada ? 'Feche a escala da semana pra liberar o PDF' : undefined}
+                  className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50"
+                >
+                  <Download className="-ml-1 mr-2 h-4 w-4" /> {gerandoPdf ? 'Gerando...' : 'PDF da semana'}
+                </button>
+              </div>
             )}
           </div>
 
