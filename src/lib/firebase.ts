@@ -16,12 +16,22 @@ import {
   type FirebaseOptions,
 } from 'firebase/app';
 import {
+  connectAuthEmulator,
   createUserWithEmailAndPassword,
   getAuth,
   signOut,
   type Auth,
 } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
+
+/**
+ * Liga a instância local (Firebase Local Emulator Suite) em vez do projeto
+ * real — útil para desenvolvimento/testes sem depender de um projeto
+ * Firebase configurado. Ver `firebase emulators:start` e `.env.example`.
+ */
+const USAR_EMULADOR = import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true';
+const authEmuladorConectado = new Set<string>();
+const dbEmuladorConectado = new Set<string>();
 
 export const firebaseConfig: FirebaseOptions = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -54,12 +64,24 @@ export function getFirebaseApp(nome?: string): FirebaseApp | null {
 
 export function getFirebaseAuth(nome?: string): Auth | null {
   const app = getFirebaseApp(nome);
-  return app ? getAuth(app) : null;
+  if (!app) return null;
+  const auth = getAuth(app);
+  if (USAR_EMULADOR && !authEmuladorConectado.has(app.name)) {
+    connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    authEmuladorConectado.add(app.name);
+  }
+  return auth;
 }
 
 export function getDb(): Firestore | null {
   const app = getFirebaseApp();
-  return app ? getFirestore(app) : null;
+  if (!app) return null;
+  const db = getFirestore(app);
+  if (USAR_EMULADOR && !dbEmuladorConectado.has(app.name)) {
+    connectFirestoreEmulator(db, '127.0.0.1', 8080);
+    dbEmuladorConectado.add(app.name);
+  }
+  return db;
 }
 
 export function requireFirebaseAuth(nome?: string): Auth {
@@ -87,6 +109,9 @@ export async function criarContaAuthIsolada(email: string, senha: string): Promi
   const app = initializeApp(firebaseConfig, nome);
   try {
     const auth = getAuth(app);
+    if (USAR_EMULADOR) {
+      connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    }
     const credencial = await createUserWithEmailAndPassword(auth, email, senha);
     await signOut(auth);
     return credencial.user.uid;

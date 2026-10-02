@@ -76,40 +76,27 @@ export default function Afastamentos() {
         </div>
       </form>
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Militar</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Motivo</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Período</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-500">Situação</th>
-              <th className="relative px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {doUbm.map((a) => {
-              const militar = militares.find((m) => m.id === a.militarId);
-              const ativo = a.dataInicio <= hoje && a.dataFim >= hoje;
-              return (
-                <tr key={a.id}>
-                  <td className="px-4 py-2">{militar?.nome ?? '—'}</td>
-                  <td className="px-4 py-2">{MOTIVO_AFASTAMENTO_LABELS[a.motivo]}{a.detalhe ? ` — ${a.detalhe}` : ''}</td>
-                  <td className="px-4 py-2">{a.dataInicio} a {a.dataFim}</td>
-                  <td className="px-4 py-2">
-                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${ativo ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-600'}`}>
-                      {ativo ? 'Em curso' : a.dataFim < hoje ? 'Encerrado' : 'Futuro'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <button onClick={() => deleteAfastamento(a.id)} className="text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
-                  </td>
-                </tr>
-              );
-            })}
-            {doUbm.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Nenhum afastamento registrado.</td></tr>}
-          </tbody>
-        </table>
+      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+        {doUbm.length === 0 ? (
+          <p className="px-4 py-8 text-center text-gray-400">Nenhum afastamento registrado.</p>
+        ) : (
+          doUbm.map((a) => {
+            const militar = militares.find((m) => m.id === a.militarId);
+            const ativo = a.dataInicio <= hoje && a.dataFim >= hoje;
+            return (
+              <div key={a.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-gray-900">{militar?.nome ?? '—'}</div>
+                  <div className="text-gray-500">{MOTIVO_AFASTAMENTO_LABELS[a.motivo]}{a.detalhe ? ` — ${a.detalhe}` : ''} · {a.dataInicio} a {a.dataFim}</div>
+                  <span className={`inline-flex mt-1 px-2 py-0.5 rounded-full text-xs font-medium ${ativo ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-600'}`}>
+                    {ativo ? 'Em curso' : a.dataFim < hoje ? 'Encerrado' : 'Futuro'}
+                  </span>
+                </div>
+                <button onClick={() => deleteAfastamento(a.id)} className="shrink-0 self-end sm:self-auto p-2 -m-2 text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

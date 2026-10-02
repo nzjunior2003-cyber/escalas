@@ -3,8 +3,29 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
+import { initializeApp, cert } from "firebase-admin/app";
+import { getMessaging, type Messaging } from "firebase-admin/messaging";
 
 dotenv.config();
+
+/**
+ * Admin SDK só é inicializado se houver uma service account configurada
+ * (FIREBASE_SERVICE_ACCOUNT_JSON, o conteúdo integral do JSON baixado em
+ * Firebase Console → Configurações do projeto → Contas de serviço → Gerar
+ * nova chave privada — nunca versionado, só via variável de ambiente).
+ * Sem ela, /api/send-push responde 503 e o resto do app segue normal
+ * (alerta interno + e-mail continuam funcionando sem push).
+ */
+let mensageiro: Messaging | null = null;
+if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+  try {
+    const credenciais = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    const app = initializeApp({ credential: cert(credenciais) });
+    mensageiro = getMessaging(app);
+  } catch (erro) {
+    console.error("FIREBASE_SERVICE_ACCOUNT_JSON inválido — push desativado:", erro);
+  }
+}
 
 const getTransporter = () => {
   if (process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASS) {
@@ -50,7 +71,7 @@ async function idTokenValido(idToken: string | undefined): Promise<boolean> {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 
   app.use(express.json());
 
@@ -92,6 +113,46 @@ async function startServer() {
     } catch (error) {
       console.error("Error sending email:", error);
       res.status(500).json({ error: "Failed to send email" });
+    }
+  });
+
+  // Usado para notificações push (Firebase Cloud Messaging) — ver notificar() em AppContext.tsx.
+  app.post("/api/send-push", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization ?? "";
+      const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+      if (!(await idTokenValido(idToken))) {
+        return res.status(401).json({ error: "Não autenticado." });
+      }
+
+      if (!mensageiro) {
+        return res.status(503).json({ error: "Push não configurado neste servidor (FIREBASE_SERVICE_ACCOUNT_JSON ausente)." });
+      }
+
+      const { tokens, title, body, link } = req.body;
+      if (!Array.isArray(tokens) || tokens.length === 0 || !title || !body) {
+        return res.status(400).json({ error: "Missing required fields (tokens, title, body)" });
+      }
+
+      const resultado = await mensageiro.sendEachForMulticast({
+        tokens,
+        data: { title: String(title), body: String(body), link: link ? String(link) : "/" },
+        webpush: {
+          fcmOptions: { link: link ? String(link) : "/" },
+        },
+      });
+
+      // Tokens inválidos/expirados não derrubam a resposta — só ficam
+      // registrados no log; o alerta interno (Firestore) já foi gravado de
+      // qualquer forma antes desta chamada.
+      resultado.responses.forEach((r, i) => {
+        if (!r.success) console.warn("Falha ao enviar push pro token", tokens[i], r.error?.message);
+      });
+
+      return res.json({ success: true, successCount: resultado.successCount, failureCount: resultado.failureCount });
+    } catch (error) {
+      console.error("Error sending push:", error);
+      res.status(500).json({ error: "Failed to send push" });
     }
   });
 
