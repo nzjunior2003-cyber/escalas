@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { NOMES_DIAS_SEMANA, diaInicioSemanaDaUbm, formatarDataISO } from '../../lib/escala';
 import type { ChangeEvent, FormEvent } from 'react';
 import { Building2, Plus, Edit2, X, Upload } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -11,7 +12,7 @@ import { temPapel, TIPO_COMANDO_LABELS, type Ubm } from '../../types';
  * (brasão, endereço, contato), mas não a sigla/nome nem outras unidades.
  */
 export default function Ubms() {
-  const { usuarioAtual, ubms, usuarios, comandos, addUbm, updateUbm, vincularUbmAoComando } = useApp();
+  const { usuarioAtual, ubms, usuarios, comandos, fechamentosEscala, addUbm, updateUbm, vincularUbmAoComando } = useApp();
   const isMaster = temPapel(usuarioAtual, 'master');
   const isComandante = temPapel(usuarioAtual, 'comandante');
   const isEscalante = temPapel(usuarioAtual, 'escalante');
@@ -89,6 +90,19 @@ export default function Ubms() {
   const handleSalvarEdicao = async (e: FormEvent) => {
     e.preventDefault();
     if (!editando) return;
+    const diaAtual = diaInicioSemanaDaUbm(ubms.find((u) => u.id === editando.id));
+    if (diaInicioSemanaDaUbm(editando) !== diaAtual) {
+      // O fechamento é gravado pela data de início da semana: trocar o dia com semana
+      // fechada de hoje em diante faria essa semana deixar de ser reconhecida como fechada.
+      const hoje = formatarDataISO(new Date());
+      const fechadasAdiante = fechamentosEscala.filter(
+        (f) => f.ubmId === editando.id && f.travada && f.semanaInicio >= hoje,
+      );
+      if (fechadasAdiante.length > 0) {
+        setErro('Há semana(s) fechada(s) de hoje em diante. Reabra-as (em Escala ou Histórico) antes de mudar o dia de início da semana.');
+        return;
+      }
+    }
     setSalvando(true);
     setErro(null);
     try {
@@ -102,6 +116,7 @@ export default function Ubms() {
         cidade: editando.cidade,
         email: editando.email,
         telefone: editando.telefone,
+        diaInicioSemana: editando.diaInicioSemana,
       });
       setEditando(null);
     } catch (erroEditar) {
@@ -337,6 +352,19 @@ export default function Ubms() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
                   <input value={editando.telefone ?? ''} onChange={(e) => setEditando({ ...editando, telefone: e.target.value })} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm" />
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">A escala semanal começa em</label>
+                <select
+                  value={diaInicioSemanaDaUbm(editando)}
+                  onChange={(e) => setEditando({ ...editando, diaInicioSemana: Number(e.target.value) })}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm sm:text-sm"
+                >
+                  {NOMES_DIAS_SEMANA.map((nome, i) => <option key={i} value={i}>{nome}</option>)}
+                </select>
+                <p className="mt-1 text-xs text-gray-400">
+                  Semana de 7 dias: {NOMES_DIAS_SEMANA[diaInicioSemanaDaUbm(editando)]} a {NOMES_DIAS_SEMANA[(diaInicioSemanaDaUbm(editando) + 6) % 7]}.
+                </p>
               </div>
               <div className="mt-6 flex justify-end space-x-3">
                 <button type="button" onClick={() => setEditando(null)} className="px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Cancelar</button>

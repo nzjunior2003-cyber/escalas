@@ -49,6 +49,7 @@ import {
   extraordinariasNoMes,
   gerarEscalaOrdinariaUbm,
   ordenarCandidatosExtraordinario,
+  diaInicioSemanaDaUbm,
   semanaInicioDe,
   sugerirMilitarExtraordinario,
   temFolga24hAntes,
@@ -1257,7 +1258,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           e.funcao === dados.funcao &&
           e.origem === 'gerada' &&
           e.data >= dados.apartirDe &&
-          !semanasTravadas.has(semanaInicioDe(e.data)),
+          !semanasTravadas.has(semanaInicioDe(e.data, diaInicioSemanaDaUbm(ubms.find((u) => u.id === dados.ubmId)))),
       );
       if (regeneraveis.length === 0) return 0;
 
@@ -1272,7 +1273,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       await gerarEPersistirEscalaOrdinaria({ ubmId: dados.ubmId, dataInicio: dados.apartirDe, dataFim: horizonte });
       return regeneraveis.length;
     },
-    [escalasOrdinarias, fechamentosEscala, gerarEPersistirEscalaOrdinaria],
+    [escalasOrdinarias, fechamentosEscala, ubms, gerarEPersistirEscalaOrdinaria],
   );
 
   // --- Escala extraordinária ---------------------------------------------

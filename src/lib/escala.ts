@@ -73,9 +73,19 @@ export function nomeUbmPorExtenso(ubm: Ubm | undefined): string {
   return `${ordinal} ${nome}`;
 }
 
-/** Segunda-feira (yyyy-MM-dd) da semana à qual `data` (yyyy-MM-dd) pertence — usado pra achar o fechamento da semana. */
-export function semanaInicioDe(data: string): string {
-  return formatarDataISO(startOfWeek(parseISO(data), { weekStartsOn: 1 }));
+export type DiaSemana = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export const NOMES_DIAS_SEMANA = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+
+/** Dia de início da semana de escala da UBM (padrão: segunda-feira) — ver `Ubm.diaInicioSemana`. */
+export function diaInicioSemanaDaUbm(ubm: { diaInicioSemana?: number } | undefined): DiaSemana {
+  const dia = ubm?.diaInicioSemana;
+  return typeof dia === 'number' && dia >= 0 && dia <= 6 ? (dia as DiaSemana) : 1;
+}
+
+/** Primeiro dia (yyyy-MM-dd) da semana de escala à qual `data` pertence, conforme o dia de início da UBM — usado pra achar o fechamento da semana. */
+export function semanaInicioDe(data: string, diaInicio: DiaSemana = 1): string {
+  return formatarDataISO(startOfWeek(parseISO(data), { weekStartsOn: diaInicio }));
 }
 
 /**
@@ -89,13 +99,14 @@ export function previsaoLiberada(
   ubm: { efetivoCompleto?: boolean } | undefined,
   funcoesAtivas: FuncaoUbm[],
   escalasOrdinariasDaUbm: EscalaOrdinaria[],
+  diaInicio: DiaSemana = 1,
 ): boolean {
   if (!ubm?.efetivoCompleto) return false;
   if (funcoesAtivas.length === 0) return false;
   if (escalasOrdinariasDaUbm.length === 0) return false;
 
   const dataMaisAntiga = escalasOrdinariasDaUbm.reduce((min, e) => (e.data < min ? e.data : min), escalasOrdinariasDaUbm[0].data);
-  const semanaBase = semanaInicioDe(dataMaisAntiga);
+  const semanaBase = semanaInicioDe(dataMaisAntiga, diaInicio);
   const diasDaSemana = Array.from({ length: 7 }, (_, i) => formatarDataISO(addDays(parseISO(semanaBase), i)));
 
   return funcoesAtivas.every((f) =>

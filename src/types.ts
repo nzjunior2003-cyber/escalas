@@ -88,6 +88,14 @@ export interface Ubm {
    * pra desmarcar depois de confirmado.
    */
   efetivoCompleto?: boolean;
+  /**
+   * Dia em que começa a semana de escala desta UBM (0 = domingo … 6 =
+   * sábado, convenção do date-fns). Cada UBM tem o próprio dia de
+   * divulgação oficial — ex.: 6 (sábado) = semana de sábado a sexta. A
+   * semana tem sempre 7 dias, então o dia final é o anterior ao inicial.
+   * Ausente = 1 (segunda-feira).
+   */
+  diaInicioSemana?: number;
 }
 
 // ---------------------------------------------------------------------------

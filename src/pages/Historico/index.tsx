@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { startOfWeek, addDays } from 'date-fns';
+import { useEffect, useState } from 'react';
+import { addDays } from 'date-fns';
 import { Download, Lock, Unlock } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { formatarDataISO, nomeUbmPorExtenso } from '../../lib/escala';
+import { NOMES_DIAS_SEMANA, diaInicioSemanaDaUbm, formatarDataISO, nomeUbmPorExtenso, semanaInicioDe } from '../../lib/escala';
 import { gerarPdfEscala } from '../../lib/pdfEscala';
 import { temPapel, type HistoricoEscala, type TipoEscalaServico } from '../../types';
 
@@ -26,7 +26,15 @@ export default function Historico() {
   const funcoesDaUbm = funcoes.filter((f) => f.ubmId === ubmId && f.ativa);
   const isEscalante = temPapel(usuarioAtual, 'escalante');
 
-  const [semana, setSemana] = useState(formatarDataISO(startOfWeek(new Date(), { weekStartsOn: 1 })));
+  const diaInicioSemana = diaInicioSemanaDaUbm(ubms.find((u) => u.id === ubmId));
+  const [semana, setSemanaBruta] = useState(() => semanaInicioDe(formatarDataISO(new Date()), diaInicioSemana));
+  // Sempre ajusta pro primeiro dia da semana de escala da UBM — o fechamento é gravado por essa data.
+  const setSemana = (valor: string) => {
+    if (valor) setSemanaBruta(semanaInicioDe(valor, diaInicioSemana));
+  };
+  useEffect(() => {
+    setSemanaBruta((atual) => semanaInicioDe(atual, diaInicioSemana));
+  }, [diaInicioSemana]);
   const [processando, setProcessando] = useState<TipoEscalaServico | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -145,7 +153,7 @@ export default function Historico() {
 
       <div className="bg-white p-6 rounded-lg border border-gray-200 space-y-4">
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Semana (segunda-feira)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Semana (começa {NOMES_DIAS_SEMANA[diaInicioSemana]})</label>
           <input
             type="date"
             value={semana}

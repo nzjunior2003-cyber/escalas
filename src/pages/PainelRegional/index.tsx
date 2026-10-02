@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { addDays, startOfWeek, format } from 'date-fns';
+import { addDays, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { ChevronLeft, Building2, Send } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { formatarDataISO } from '../../lib/escala';
+import { diaInicioSemanaDaUbm, formatarDataISO, semanaInicioDe } from '../../lib/escala';
 import {
   afastamentosPorMotivo,
   efetivoPorCargoEFuncao,
@@ -148,7 +148,7 @@ function VisaoComando({ comando, comandoOrigemId }: { comando: Comando; comandoO
 
 /** Detalhamento de uma UBM: efetivo por cargo/função, escala da semana, médias de folga, volume de trabalho e afastamentos — com filtro de período. */
 function VisaoUbm({ ubmId, nomeUbm, comandoOrigemId }: { ubmId: string; nomeUbm: string; comandoOrigemId: string }) {
-  const { funcoes, militares, escalasOrdinarias, escalasExtraordinarias, afastamentos } = useApp();
+  const { ubms, funcoes, militares, escalasOrdinarias, escalasExtraordinarias, afastamentos } = useApp();
 
   const hoje = new Date();
   const [periodoInicio, setPeriodoInicio] = useState(formatarDataISO(new Date(hoje.getFullYear(), 0, 1)));
@@ -164,7 +164,7 @@ function VisaoUbm({ ubmId, nomeUbm, comandoOrigemId }: { ubmId: string; nomeUbm:
     motivoNome: MOTIVO_AFASTAMENTO_LABELS[a.motivo],
   }));
 
-  const semanaInicio = formatarDataISO(startOfWeek(hoje, { weekStartsOn: 1 }));
+  const semanaInicio = semanaInicioDe(formatarDataISO(hoje), diaInicioSemanaDaUbm(ubms.find((u) => u.id === ubmId)));
   const diasDaSemana = Array.from({ length: 7 }, (_, i) => formatarDataISO(addDays(new Date(semanaInicio + 'T00:00:00'), i)));
 
   return (

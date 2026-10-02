@@ -4,7 +4,8 @@ import { addDays, addMonths, addYears, format, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarDays, Download, Plus, Sparkles, Lock, Megaphone, HandHeart, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { LIMITE_EXTRAORDINARIAS_POR_MES, extraordinariasNoMes, formatarDataISO, nomeUbmPorExtenso, ordenarCandidatosExtraordinario, previsaoLiberada, semanaInicioDe } from '../../lib/escala';
+import { LIMITE_EXTRAORDINARIAS_POR_MES, diaInicioSemanaDaUbm, extraordinariasNoMes, formatarDataISO, nomeUbmPorExtenso, ordenarCandidatosExtraordinario, previsaoLiberada, semanaInicioDe } from '../../lib/escala';
+import type { DiaSemana } from '../../lib/escala';
 import { gerarPdfEscala } from '../../lib/pdfEscala';
 import { abreviarPosto } from '../../lib/posto';
 import { STATUS_VAGA_VOLUNTARIA_LABELS, temPapel } from '../../types';
@@ -13,9 +14,9 @@ import type { EscalaOrdinaria, FuncaoUbm, Militar } from '../../types';
 type Aba = 'ordinaria' | 'extraordinaria' | 'diferenciada';
 type Granularidade = 'semanal' | 'mensal' | 'anual';
 
-function intervaloPorGranularidade(granularidade: Granularidade, base: Date): { inicio: string; fim: string; dias: string[] } {
+function intervaloPorGranularidade(granularidade: Granularidade, base: Date, diaInicioSemana: DiaSemana): { inicio: string; fim: string; dias: string[] } {
   if (granularidade === 'semanal') {
-    const inicio = startOfWeek(base, { weekStartsOn: 1 });
+    const inicio = startOfWeek(base, { weekStartsOn: diaInicioSemana });
     const dias = Array.from({ length: 7 }, (_, i) => formatarDataISO(addDays(inicio, i)));
     return { inicio: dias[0], fim: dias[6], dias };
   }
@@ -60,7 +61,8 @@ export default function Escala() {
   const [dataBase, setDataBase] = useState(() => new Date());
   const ubmId = usuarioAtual?.ubmId ?? '';
   const isEscalante = temPapel(usuarioAtual, 'escalante');
-  const { inicio, fim, dias } = useMemo(() => intervaloPorGranularidade(granularidade, dataBase), [granularidade, dataBase]);
+  const diaInicioSemana = diaInicioSemanaDaUbm(ubms.find((u) => u.id === ubmId));
+  const { inicio, fim, dias } = useMemo(() => intervaloPorGranularidade(granularidade, dataBase, diaInicioSemana), [granularidade, dataBase, diaInicioSemana]);
 
   const funcoesDaUbm = funcoes
     .filter((f) => f.ubmId === ubmId && f.ativa)
@@ -75,10 +77,10 @@ export default function Escala() {
 
   const ubmAtual = ubms.find((u) => u.id === ubmId);
   const escalasOrdinariasDaUbm = escalasOrdinarias.filter((e) => e.ubmId === ubmId);
-  const podeGerarPrevisao = previsaoLiberada(ubmAtual, funcoesDaUbm, escalasOrdinariasDaUbm);
+  const podeGerarPrevisao = previsaoLiberada(ubmAtual, funcoesDaUbm, escalasOrdinariasDaUbm, diaInicioSemana);
 
   const estaTravada = (data: string) => {
-    const docId = `${ubmId}_ordinaria_${semanaInicioDe(data)}`;
+    const docId = `${ubmId}_ordinaria_${semanaInicioDe(data, diaInicioSemana)}`;
     return fechamentosEscala.find((f) => f.id === docId)?.travada ?? false;
   };
 
@@ -666,6 +668,7 @@ function FuncaoLinha({
 function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante: boolean }) {
   const {
     usuarioAtual,
+    ubms,
     militares,
     funcoes,
     afastamentos,
@@ -699,7 +702,7 @@ function AbaExtraordinaria({ ubmId, isEscalante }: { ubmId: string; isEscalante:
   const nomeDaFuncao = (funcaoId: string) => funcoes.find((f) => f.id === funcaoId)?.nome ?? 'Função removida';
   const nomeMilitar = (id?: string) => militares.find((m) => m.id === id)?.nome ?? '—';
   const estaTravada = (data: string) => {
-    const docId = `${ubmId}_extraordinaria_${semanaInicioDe(data)}`;
+    const docId = `${ubmId}_extraordinaria_${semanaInicioDe(data, diaInicioSemanaDaUbm(ubms.find((u) => u.id === ubmId)))}`;
     return fechamentosEscala.find((f) => f.id === docId)?.travada ?? false;
   };
 
